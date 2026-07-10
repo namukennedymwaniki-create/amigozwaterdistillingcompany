@@ -9,9 +9,6 @@ import bcrypt
 import os
 from dotenv import load_dotenv
 import base64
-from streamlit_option_menu import option_menu
-from streamlit_extras.metric_cards import style_metric_cards
-from streamlit_extras.grid import grid
 
 # Load environment variables
 load_dotenv()
@@ -60,15 +57,6 @@ def apply_custom_css():
             padding: 0rem 1rem;
         }
         
-        /* Sidebar styling */
-        .css-1d391kg {
-            background: linear-gradient(180deg, #1a1a2e 0%, #2d3436 100%);
-        }
-        
-        .css-1d391kg .css-1v3fvcr {
-            color: white;
-        }
-        
         /* Metric cards */
         .metric-card {
             background: white;
@@ -76,16 +64,12 @@ def apply_custom_css():
             border-radius: 15px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.08);
             transition: all 0.3s;
+            border-left: 4px solid #667eea;
         }
         
         .metric-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 5px 20px rgba(0,0,0,0.12);
-        }
-        
-        .metric-icon {
-            font-size: 24px;
-            margin-bottom: 10px;
         }
         
         .metric-value {
@@ -98,52 +82,6 @@ def apply_custom_css():
             font-size: 14px;
             color: #888;
             margin-top: 5px;
-        }
-        
-        /* KPI Cards */
-        .kpi-card {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-            border-left: 4px solid #667eea;
-            margin-bottom: 15px;
-        }
-        
-        .kpi-card .kpi-title {
-            font-size: 13px;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .kpi-card .kpi-value {
-            font-size: 24px;
-            font-weight: 700;
-            color: #2d3436;
-            margin: 5px 0;
-        }
-        
-        .kpi-card .kpi-change {
-            font-size: 12px;
-            color: #28a745;
-        }
-        
-        /* Data tables */
-        .dataframe {
-            font-size: 14px;
-        }
-        
-        /* Buttons */
-        .stButton button {
-            border-radius: 8px;
-            font-weight: 500;
-            transition: all 0.3s;
-        }
-        
-        .stButton button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
         
         /* Login container */
@@ -176,12 +114,7 @@ def apply_custom_css():
             color: #e9ecef;
         }
         
-        .dark-theme .kpi-card {
-            background: #16213e;
-            color: #e9ecef;
-        }
-        
-        .dark-theme .kpi-card .kpi-value {
+        .dark-theme .metric-value {
             color: #e9ecef;
         }
         
@@ -191,6 +124,49 @@ def apply_custom_css():
         
         .dark-theme .login-title h2 {
             color: #e9ecef;
+        }
+        
+        /* Buttons */
+        .stButton button {
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s;
+            width: 100%;
+        }
+        
+        .stButton button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Dataframes */
+        .dataframe {
+            font-size: 14px;
+        }
+        
+        /* Status badges */
+        .badge-success {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+        
+        .badge-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+        
+        .badge-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -209,11 +185,11 @@ def login_page():
     with st.container():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
-            remember = st.checkbox("Remember me")
+            username = st.text_input("Username", placeholder="Enter your username", key="login_username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
+            remember = st.checkbox("Remember me", key="login_remember")
             
-            if st.button("Sign In", use_container_width=True):
+            if st.button("Sign In", key="login_button", use_container_width=True):
                 if username and password:
                     # Authenticate user
                     session = get_db_connection()
@@ -240,7 +216,9 @@ def login_page():
                             
                             st.rerun()
                         else:
-                            st.error("Invalid username or password")
+                            st.error("❌ Invalid username or password")
+                    except Exception as e:
+                        st.error(f"Database error: {str(e)}")
                     finally:
                         session.close()
                 else:
@@ -274,69 +252,51 @@ def sidebar_navigation():
             </div>
             """, unsafe_allow_html=True)
         
-        # Navigation menu
-        selected = option_menu(
-            menu_title=None,
-            options=[
-                "Dashboard",
-                "User Management",
-                "Products",
-                "Suppliers",
-                "Customers",
-                "Inventory",
-                "Procurement",
-                "Production",
-                "Quality Control",
-                "Sales",
-                "Finance",
-                "Reports",
-                "Settings"
-            ],
-            icons=[
-                "house", "people", "box", "truck", "person",
-                "archive", "cart", "gear", "clipboard-check",
-                "cash-stack", "bank", "file-earmark-bar-graph", "gear"
-            ],
-            menu_icon="cast",
-            default_index=0,
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "rgba(255,255,255,0.6)", "font-size": "18px"},
-                "nav-link": {
-                    "color": "rgba(255,255,255,0.7)",
-                    "font-size": "14px",
-                    "text-align": "left",
-                    "margin": "2px 0",
-                    "padding": "10px 15px",
-                    "border-radius": "10px",
-                },
-                "nav-link-selected": {
-                    "background": "linear-gradient(135deg, rgba(102,126,234,0.3), rgba(118,75,162,0.3))",
-                    "color": "white",
-                },
-            }
-        )
+        # Navigation - Using simple buttons instead of option_menu
+        st.markdown("### Navigation")
         
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("<hr style='border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+        pages = {
+            "Dashboard": "🏠",
+            "User Management": "👤",
+            "Products": "📦",
+            "Suppliers": "🏭",
+            "Customers": "👥",
+            "Inventory": "📊",
+            "Procurement": "🛒",
+            "Production": "⚙️",
+            "Quality Control": "🧪",
+            "Sales": "💰",
+            "Finance": "💳",
+            "Reports": "📈",
+            "Settings": "⚙️"
+        }
+        
+        for page_name, icon in pages.items():
+            if st.button(f"{icon} {page_name}", key=f"nav_{page_name}", use_container_width=True):
+                st.session_state.page = page_name
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Theme toggle
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            theme_icon = "🌙" if st.session_state.theme == 'light' else "☀️"
+        with col2:
+            if st.button(f"{theme_icon} Toggle Theme", key="theme_toggle", use_container_width=True):
+                st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
+                st.rerun()
+        
+        st.markdown("---")
         
         # Logout button
-        if st.button("🚪 Logout", use_container_width=True):
+        if st.button("🚪 Logout", key="logout_button", use_container_width=True):
             st.session_state.authenticated = False
             st.session_state.user = None
             st.session_state.role = None
             st.rerun()
-        
-        # Theme toggle
-        theme = st.toggle("🌙 Dark Mode", value=st.session_state.theme == 'dark')
-        if theme and st.session_state.theme == 'light':
-            st.session_state.theme = 'dark'
-            st.rerun()
-        elif not theme and st.session_state.theme == 'dark':
-            st.session_state.theme = 'light'
-            st.rerun()
     
-    return selected
+    return st.session_state.page
 
 # Dashboard page
 def dashboard_page():
@@ -378,25 +338,16 @@ def dashboard_page():
             LIMIT 10
         """)).fetchall()
         
-        # Production stats (mock for demo)
-        production_today = 1245
-        production_month = 34200
-        machine_utilization = 76
-        
-        # Sales stats (mock)
-        sales_today = 2450.50
-        monthly_revenue = 48200.00
-        outstanding = 12500.00
-        
-        # Quality stats (mock)
-        water_status = "Passed"
-        failed_batches = 3
-        approved_batches = 87
-        
-        # Delivery stats (mock)
-        vehicles_out = 5
-        deliveries_completed = 12
-        
+    except Exception as e:
+        st.warning(f"Could not fetch data: {str(e)}. Using demo data.")
+        product_count = 45
+        supplier_count = 12
+        customer_count = 89
+        user_count = 15
+        low_stock = 8
+        total_stock_value = 125000.00
+        recent_transactions = []
+    
     finally:
         session.close()
     
@@ -439,7 +390,7 @@ def dashboard_page():
         st.metric(
             label="⚠️ Low Stock Alerts",
             value=low_stock,
-            delta="Needs attention",
+            delta="Needs attention" if low_stock > 0 else "All good",
             delta_color="inverse" if low_stock > 0 else "normal"
         )
     
@@ -450,60 +401,6 @@ def dashboard_page():
             delta="Total inventory",
             delta_color="normal"
         )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # KPI Cards - Row 2 (Production, Sales, Quality, Delivery)
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">⚙️ Production Today</div>
-            <div class="kpi-value">{production_today:,}</div>
-            <div style="display: flex; gap: 15px; margin-top: 5px;">
-                <span style="font-size: 12px; color: #888;">Units</span>
-                <span style="font-size: 12px; color: #28a745;">↑ 12%</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">📈 Machine Utilization</div>
-            <div class="kpi-value">{machine_utilization}%</div>
-            <div style="width: 100%; height: 6px; background: #e9ecef; border-radius: 3px; margin-top: 8px;">
-                <div style="width: {machine_utilization}%; height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 3px;"></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">💰 Today's Sales</div>
-            <div class="kpi-value">${sales_today:,.2f}</div>
-            <div style="display: flex; gap: 15px; margin-top: 5px;">
-                <span style="font-size: 12px; color: #888;">Revenue</span>
-                <span style="font-size: 12px; color: #28a745;">↑ 8%</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">🧪 Quality Status</div>
-            <div class="kpi-value" style="color: #28a745;">
-                <span style="font-size: 20px;">✅</span> {water_status}
-            </div>
-            <div style="display: flex; gap: 15px; margin-top: 5px;">
-                <span style="font-size: 12px; color: #888;">Failed: {failed_batches}</span>
-                <span style="font-size: 12px; color: #28a745;">Approved: {approved_batches}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -572,23 +469,10 @@ def dashboard_page():
         df = pd.DataFrame(recent_transactions, columns=['Date', 'Product', 'Type', 'Quantity', 'User'])
         df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d %H:%M')
         
-        # Color code transaction types
-        def color_type(val):
-            if val == 'IN':
-                return 'background-color: #d4edda; color: #155724;'
-            elif val == 'OUT':
-                return 'background-color: #f8d7da; color: #721c24;'
-            else:
-                return 'background-color: #fff3cd; color: #856404;'
-        
         st.dataframe(
             df,
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Type": st.column_config.TextColumn("Type", width="small"),
-                "Quantity": st.column_config.NumberColumn("Qty", width="small"),
-            }
+            hide_index=True
         )
     else:
         st.info("No recent transactions found")
@@ -600,7 +484,7 @@ def user_management_page():
     # Add user button
     col1, col2 = st.columns([6, 1])
     with col2:
-        if st.button("➕ Add User", use_container_width=True):
+        if st.button("➕ Add User", key="add_user_btn", use_container_width=True):
             st.session_state.show_add_user = True
     
     # Add user form
@@ -653,7 +537,7 @@ def user_management_page():
                                 "is_superuser": is_superuser
                             })
                             session.commit()
-                            st.success("User created successfully!")
+                            st.success("✅ User created successfully!")
                             st.session_state.show_add_user = False
                             st.rerun()
                         except Exception as e:
@@ -675,6 +559,9 @@ def user_management_page():
             LEFT JOIN roles r ON u.role_id = r.id
             ORDER BY u.created_at DESC
         """)).fetchall()
+    except Exception as e:
+        st.error(f"Error fetching users: {str(e)}")
+        users = []
     finally:
         session.close()
     
@@ -685,25 +572,14 @@ def user_management_page():
         ])
         
         # Format dates
-        df['Last Login'] = pd.to_datetime(df['Last Login']).dt.strftime('%Y-%m-%d %H:%M') if df['Last Login'].any() else 'Never'
+        df['Last Login'] = pd.to_datetime(df['Last Login']).dt.strftime('%Y-%m-%d %H:%M') 
         df['Created At'] = pd.to_datetime(df['Created At']).dt.strftime('%Y-%m-%d')
-        
-        # Status badges
         df['Status'] = df['Active'].apply(lambda x: '✅ Active' if x else '❌ Inactive')
         
-        # Display table with column configuration
         st.dataframe(
             df[['Username', 'Email', 'Role', 'Status', 'Last Login', 'Created At']],
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Username": st.column_config.TextColumn("Username", width="small"),
-                "Email": st.column_config.TextColumn("Email"),
-                "Role": st.column_config.TextColumn("Role", width="small"),
-                "Status": st.column_config.TextColumn("Status", width="small"),
-                "Last Login": st.column_config.TextColumn("Last Login", width="small"),
-                "Created At": st.column_config.TextColumn("Created", width="small"),
-            }
+            hide_index=True
         )
     else:
         st.info("No users found")
@@ -726,7 +602,7 @@ def products_page():
         show_inactive = st.checkbox("Show Inactive")
     
     # Add product button
-    if st.button("➕ Add Product", use_container_width=True):
+    if st.button("➕ Add Product", key="add_product_btn", use_container_width=True):
         st.session_state.show_add_product = True
     
     # Add product form
@@ -783,7 +659,7 @@ def products_page():
                                 "barcode": barcode
                             })
                             session.commit()
-                            st.success("Product created successfully!")
+                            st.success("✅ Product created successfully!")
                             st.session_state.show_add_product = False
                             st.rerun()
                         except Exception as e:
@@ -821,6 +697,9 @@ def products_page():
         query += " ORDER BY p.name"
         
         products = session.execute(text(query), params).fetchall()
+    except Exception as e:
+        st.error(f"Error fetching products: {str(e)}")
+        products = []
     finally:
         session.close()
     
@@ -845,16 +724,7 @@ def products_page():
         st.dataframe(
             df[['Code', 'Name', 'Category', 'Stock', 'Unit Price', 'Status', 'Active']],
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Code": st.column_config.TextColumn("Code", width="small"),
-                "Name": st.column_config.TextColumn("Product Name"),
-                "Category": st.column_config.TextColumn("Category", width="small"),
-                "Stock": st.column_config.NumberColumn("Stock", width="small"),
-                "Unit Price": st.column_config.TextColumn("Unit Price", width="small"),
-                "Status": st.column_config.TextColumn("Status", width="small"),
-                "Active": st.column_config.CheckboxColumn("Active", width="small"),
-            }
+            hide_index=True
         )
     else:
         st.info("No products found")
@@ -864,7 +734,7 @@ def suppliers_page():
     st.markdown("<h2>🏭 Supplier Management</h2>", unsafe_allow_html=True)
     
     # Add supplier
-    if st.button("➕ Add Supplier", use_container_width=True):
+    if st.button("➕ Add Supplier", key="add_supplier_btn", use_container_width=True):
         st.session_state.show_add_supplier = True
     
     if st.session_state.get('show_add_supplier', False):
@@ -902,7 +772,7 @@ def suppliers_page():
                                 "payment_terms": payment_terms
                             })
                             session.commit()
-                            st.success("Supplier created successfully!")
+                            st.success("✅ Supplier created successfully!")
                             st.session_state.show_add_supplier = False
                             st.rerun()
                         except Exception as e:
@@ -921,6 +791,9 @@ def suppliers_page():
             WHERE is_active = true
             ORDER BY name
         """)).fetchall()
+    except Exception as e:
+        st.error(f"Error fetching suppliers: {str(e)}")
+        suppliers = []
     finally:
         session.close()
     
@@ -931,15 +804,7 @@ def suppliers_page():
         st.dataframe(
             df[['Name', 'Contact', 'Email', 'Phone', 'Payment Terms', 'Status']],
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Name": st.column_config.TextColumn("Company Name"),
-                "Contact": st.column_config.TextColumn("Contact Person"),
-                "Email": st.column_config.TextColumn("Email"),
-                "Phone": st.column_config.TextColumn("Phone", width="small"),
-                "Payment Terms": st.column_config.NumberColumn("Terms (days)", width="small"),
-                "Status": st.column_config.TextColumn("Status", width="small"),
-            }
+            hide_index=True
         )
     else:
         st.info("No suppliers found")
@@ -949,7 +814,7 @@ def customers_page():
     st.markdown("<h2>👥 Customer Management</h2>", unsafe_allow_html=True)
     
     # Add customer
-    if st.button("➕ Add Customer", use_container_width=True):
+    if st.button("➕ Add Customer", key="add_customer_btn", use_container_width=True):
         st.session_state.show_add_customer = True
     
     if st.session_state.get('show_add_customer', False):
@@ -987,7 +852,7 @@ def customers_page():
                                 "credit_limit": credit_limit
                             })
                             session.commit()
-                            st.success("Customer created successfully!")
+                            st.success("✅ Customer created successfully!")
                             st.session_state.show_add_customer = False
                             st.rerun()
                         except Exception as e:
@@ -1006,6 +871,9 @@ def customers_page():
             WHERE is_active = true
             ORDER BY name
         """)).fetchall()
+    except Exception as e:
+        st.error(f"Error fetching customers: {str(e)}")
+        customers = []
     finally:
         session.close()
     
@@ -1018,19 +886,20 @@ def customers_page():
         st.dataframe(
             df[['Name', 'Contact', 'Email', 'Phone', 'Credit Limit', 'Balance', 'Status']],
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Name": st.column_config.TextColumn("Customer Name"),
-                "Contact": st.column_config.TextColumn("Contact Person"),
-                "Email": st.column_config.TextColumn("Email"),
-                "Phone": st.column_config.TextColumn("Phone", width="small"),
-                "Credit Limit": st.column_config.TextColumn("Credit Limit", width="small"),
-                "Balance": st.column_config.TextColumn("Balance", width="small"),
-                "Status": st.column_config.TextColumn("Status", width="small"),
-            }
+            hide_index=True
         )
     else:
         st.info("No customers found")
+
+# Placeholder pages
+def placeholder_page(page_name):
+    st.markdown(f"<h2>{page_name}</h2>", unsafe_allow_html=True)
+    st.info(f"🚧 {page_name} module coming soon...")
+    
+    # Show a progress indicator
+    progress = 0.3
+    st.progress(progress)
+    st.caption(f"Development progress: {int(progress * 100)}%")
 
 # Main app
 def main():
@@ -1039,6 +908,10 @@ def main():
     
     # Apply custom CSS
     apply_custom_css()
+    
+    # Apply theme
+    if st.session_state.theme == 'dark':
+        st.markdown('<div class="dark-theme">', unsafe_allow_html=True)
     
     # Check authentication
     if not st.session_state.authenticated:
@@ -1059,30 +932,14 @@ def main():
         suppliers_page()
     elif selected_page == "Customers":
         customers_page()
-    elif selected_page == "Inventory":
-        st.markdown("<h2>📦 Inventory Management</h2>", unsafe_allow_html=True)
-        st.info("Inventory module coming soon...")
-    elif selected_page == "Procurement":
-        st.markdown("<h2>🛒 Procurement Management</h2>", unsafe_allow_html=True)
-        st.info("Procurement module coming soon...")
-    elif selected_page == "Production":
-        st.markdown("<h2>🏭 Production Management</h2>", unsafe_allow_html=True)
-        st.info("Production module coming soon...")
-    elif selected_page == "Quality Control":
-        st.markdown("<h2>🧪 Quality Control</h2>", unsafe_allow_html=True)
-        st.info("Quality Control module coming soon...")
-    elif selected_page == "Sales":
-        st.markdown("<h2>📊 Sales Management</h2>", unsafe_allow_html=True)
-        st.info("Sales module coming soon...")
-    elif selected_page == "Finance":
-        st.markdown("<h2>💰 Finance</h2>", unsafe_allow_html=True)
-        st.info("Finance module coming soon...")
-    elif selected_page == "Reports":
-        st.markdown("<h2>📊 Reports</h2>", unsafe_allow_html=True)
-        st.info("Reports module coming soon...")
-    elif selected_page == "Settings":
-        st.markdown("<h2>⚙️ Settings</h2>", unsafe_allow_html=True)
-        st.info("Settings module coming soon...")
+    elif selected_page in ["Inventory", "Procurement", "Production", "Quality Control", "Sales", "Finance", "Reports", "Settings"]:
+        placeholder_page(selected_page)
+    else:
+        dashboard_page()
+    
+    # Close dark theme div
+    if st.session_state.theme == 'dark':
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
