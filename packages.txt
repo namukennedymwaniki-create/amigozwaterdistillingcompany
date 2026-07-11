@@ -1,6 +1,1 @@
-# System dependencies for Streamlit Cloud
-gcc
-postgresql-client
-libpq-dev
-python3-dev
-build-essential
+
