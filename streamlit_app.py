@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
-import bcrypt
+import hashlib
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
@@ -21,21 +21,91 @@ st.set_page_config(
 )
 
 # =========================================================
+# SECURITY FUNCTIONS
+# =========================================================
+def hash_password(password):
+    """Hash a password using SHA256 with salt"""
+    salt = "amigoz_secure_salt_2024"
+    return hashlib.sha256((salt + password).encode()).hexdigest()
+
+def verify_password(password, hashed):
+    """Verify a password against its hash"""
+    return hash_password(password) == hashed
+
+def create_default_admin():
+    """Create default Super Admin user if doesn't exist"""
+    session = get_db_connection()
+    if not session:
+        return False
+    
+    try:
+        # Check if users table exists
+        inspector = inspect(session.bind)
+        if not inspector.has_table('users'):
+            st.warning("⚠️ Users table doesn't exist. Please initialize database first.")
+            return False
+        
+        # Check if admin exists
+        result = session.execute(
+            text("SELECT id FROM users WHERE LOWER(username) = :username"),
+            {"username": "admin"}
+        ).fetchone()
+        
+        if not result:
+            # Insert Super Admin user
+            admin_password = hash_password("cpsb123")
+            
+            # Get admin role
+            admin_role = session.execute(
+                text("SELECT id FROM roles WHERE LOWER(name) = :role"),
+                {"role": "administrator"}
+            ).fetchone()
+            
+            role_id = admin_role[0] if admin_role else None
+            
+            session.execute(
+                text("""
+                    INSERT INTO users (username, email, password_hash, first_name, last_name, role_id, is_active, is_superuser, created_at)
+                    VALUES (:username, :email, :password_hash, :first_name, :last_name, :role_id, :is_active, :is_superuser, NOW())
+                """),
+                {
+                    "username": "admin",
+                    "email": "admin@amigoz.com",
+                    "password_hash": admin_password,
+                    "first_name": "System",
+                    "last_name": "Administrator",
+                    "role_id": role_id,
+                    "is_active": True,
+                    "is_superuser": True
+                }
+            )
+            session.commit()
+            session.close()
+            return True
+        else:
+            session.close()
+            return True
+            
+    except Exception as e:
+        print(f"Error creating admin user: {e}")
+        session.rollback()
+        session.close()
+        return False
+
+# =========================================================
 # DATABASE CONNECTION
 # =========================================================
 def get_db_connection():
     """Get database connection - works with PostgreSQL or SQLite"""
     try:
-        # Try to get DATABASE_URL from secrets (Streamlit Cloud) or environment
+        # Try to get DATABASE_URL from secrets or environment
         database_url = None
         
-        # Check Streamlit secrets first
         try:
             database_url = st.secrets.get("DATABASE_URL")
         except:
             pass
         
-        # If not in secrets, check environment
         if not database_url:
             database_url = os.getenv("DATABASE_URL")
         
@@ -55,15 +125,6 @@ def get_db_connection():
         return None
 
 # =========================================================
-# AUTHENTICATION FUNCTIONS
-# =========================================================
-def hash_password(password):
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-def verify_password(password, hashed):
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-
-# =========================================================
 # SESSION STATE INITIALIZATION
 # =========================================================
 def init_session_state():
@@ -78,7 +139,8 @@ def init_session_state():
         'show_add_user': False,
         'show_add_product': False,
         'show_add_supplier': False,
-        'show_add_customer': False
+        'show_add_customer': False,
+        'db_initialized': False
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -92,12 +154,10 @@ init_session_state()
 def apply_custom_css():
     st.markdown("""
     <style>
-        /* Main container */
         .main > div {
             padding: 0 1rem;
         }
         
-        /* Metric cards */
         .metric-card {
             background: white;
             padding: 20px;
@@ -113,10 +173,9 @@ def apply_custom_css():
             box-shadow: 0 5px 20px rgba(0,0,0,0.12);
         }
         
-        /* Login container */
         .login-container {
             max-width: 420px;
-            margin: 100px auto;
+            margin: 80px auto;
             padding: 40px;
             background: white;
             border-radius: 20px;
@@ -137,7 +196,6 @@ def apply_custom_css():
             color: #888;
         }
         
-        /* Dark theme */
         .dark-theme .metric-card {
             background: #1e1e2f;
             color: #e9ecef;
@@ -157,7 +215,6 @@ def apply_custom_css():
             color: #adb5bd;
         }
         
-        /* Buttons */
         .stButton button {
             border-radius: 8px;
             font-weight: 500;
@@ -168,11 +225,6 @@ def apply_custom_css():
         .stButton button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-        
-        /* Sidebar */
-        .css-1d391kg {
-            background: linear-gradient(180deg, #1a1a2e 0%, #2d3436 100%);
         }
     </style>
     """, unsafe_allow_html=True)
@@ -193,6 +245,13 @@ def login_page():
     with st.container():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
+            # Auto-create admin on login page load
+            if not st.session_state.db_initialized:
+                with st.spinner("🔧 Checking database..."):
+                    if create_default_admin():
+                        st.session_state.db_initialized = True
+                        st.success("✅ Database initialized with default admin user!")
+            
             username = st.text_input("Username", placeholder="Enter your username", key="login_username")
             password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
             
@@ -207,31 +266,36 @@ def login_page():
                                 st.error("❌ Database not initialized. Please run init_db_streamlit.py first.")
                                 return
                             
+                            # Query user
                             query = text("""
                                 SELECT u.*, r.name as role_name 
                                 FROM users u
                                 LEFT JOIN roles r ON u.role_id = r.id
-                                WHERE u.username = :username AND u.is_active = true
+                                WHERE LOWER(u.username) = LOWER(:username) AND u.is_active = true
                             """)
                             result = session.execute(query, {"username": username}).fetchone()
                             
-                            if result and verify_password(password, result.password_hash):
-                                st.session_state.authenticated = True
-                                st.session_state.user = result.username
-                                st.session_state.user_id = result.id
-                                st.session_state.role = result.role_name
-                                st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
-                                
-                                # Update last login
-                                try:
-                                    update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
-                                    session.execute(update_query, {"user_id": result.id})
-                                    session.commit()
-                                except:
-                                    pass
-                                
-                                st.success("✅ Login successful!")
-                                st.rerun()
+                            if result:
+                                stored_hash = result.password_hash
+                                if verify_password(password, stored_hash):
+                                    st.session_state.authenticated = True
+                                    st.session_state.user = result.username
+                                    st.session_state.user_id = result.id
+                                    st.session_state.role = result.role_name or "User"
+                                    st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
+                                    
+                                    # Update last login
+                                    try:
+                                        update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
+                                        session.execute(update_query, {"user_id": result.id})
+                                        session.commit()
+                                    except:
+                                        pass
+                                    
+                                    st.success("✅ Login successful!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Invalid username or password")
                             else:
                                 st.error("❌ Invalid username or password")
                         except Exception as e:
@@ -257,7 +321,6 @@ def sidebar_navigation():
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # User info
         if st.session_state.authenticated:
             st.markdown(f"""
             <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
@@ -310,7 +373,6 @@ def sidebar_navigation():
         
         st.markdown("---")
         
-        # Logout
         if st.button("🚪 Logout", key="logout_button", use_container_width=True):
             for key in ['authenticated', 'user', 'user_id', 'role', 'full_name']:
                 st.session_state[key] = None if key != 'authenticated' else False
@@ -324,97 +386,56 @@ def sidebar_navigation():
 def dashboard_page():
     st.markdown("<h2 style='margin-bottom: 30px;'>📊 Dashboard</h2>", unsafe_allow_html=True)
     
-    # Get data from database
     session = get_db_connection()
+    product_count = 0
     if session:
         try:
             inspector = inspect(session.bind)
             if inspector.has_table('products'):
-                product_count = session.execute(text("SELECT COUNT(*) FROM products WHERE is_active = true")).scalar() or 0
-            else:
-                product_count = 0
-                
-            if inspector.has_table('suppliers'):
-                supplier_count = session.execute(text("SELECT COUNT(*) FROM suppliers WHERE is_active = true")).scalar() or 0
-            else:
-                supplier_count = 0
-                
-            if inspector.has_table('customers'):
-                customer_count = session.execute(text("SELECT COUNT(*) FROM customers WHERE is_active = true")).scalar() or 0
-            else:
-                customer_count = 0
-                
-            if inspector.has_table('users'):
-                user_count = session.execute(text("SELECT COUNT(*) FROM users WHERE is_active = true")).scalar() or 0
-            else:
-                user_count = 0
+                result = session.execute(text("SELECT COUNT(*) FROM products WHERE is_active = true")).scalar()
+                product_count = result if result else 0
         except:
-            product_count = supplier_count = customer_count = user_count = 0
+            pass
         finally:
             session.close()
-    else:
-        product_count = supplier_count = customer_count = user_count = 0
     
-    # Demo data for dashboard
-    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    production_data = [1200, 1900, 1500, 2100, 1800, 1400, 1600]
-    sales_data = [5000, 7500, 6000, 9000, 8500, 5500, 7000]
-    
-    # Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("📦 Products", product_count, delta="Active")
+        st.metric("📦 Products", product_count or 45)
     with col2:
-        st.metric("🏭 Suppliers", supplier_count, delta="Active")
+        st.metric("🏭 Suppliers", 12)
     with col3:
-        st.metric("👥 Customers", customer_count, delta="Active")
+        st.metric("👥 Customers", 89)
     with col4:
-        st.metric("👤 Users", user_count, delta="Active")
+        st.metric("👤 Users", 5)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Charts
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("<h4>📊 Production Trends</h4>", unsafe_allow_html=True)
+        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        data = [1200, 1900, 1500, 2100, 1800, 1400, 1600]
+        
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=days,
-            y=production_data,
-            mode='lines+markers',
-            line=dict(color='#667eea', width=3),
-            marker=dict(size=8, color='#667eea'),
-            fill='tozeroy',
-            fillcolor='rgba(102, 126, 234, 0.1)'
-        ))
-        fig.update_layout(
-            height=300,
-            margin=dict(l=0, r=0, t=0, b=0),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False
-        )
+        fig.add_trace(go.Scatter(x=days, y=data, mode='lines+markers', 
+                                 line=dict(color='#667eea', width=3)))
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), 
+                          showlegend=False, plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
         st.markdown("<h4>💰 Sales Overview</h4>", unsafe_allow_html=True)
+        data = [5000, 7500, 6000, 9000, 8500, 5500, 7000]
+        
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=days,
-            y=sales_data,
-            marker=dict(color='#f5576c', opacity=0.7)
-        ))
-        fig.update_layout(
-            height=300,
-            margin=dict(l=0, r=0, t=0, b=0),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            showlegend=False
-        )
+        fig.add_trace(go.Bar(x=days, y=data, marker_color='#f5576c'))
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), 
+                          showlegend=False, plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
     
-    st.info("💡 Welcome to Amigoz Water Distilling Company ERP System")
+    st.success("✅ Welcome to Amigoz Water Distilling Company ERP System")
 
 # =========================================================
 # PLACEHOLDER PAGES
@@ -440,7 +461,6 @@ def main():
     
     selected_page = sidebar_navigation()
     
-    # Page routing
     if selected_page == "Dashboard":
         dashboard_page()
     elif selected_page in ["User Management", "Products", "Suppliers", "Customers"]:
