@@ -42,7 +42,6 @@ def create_default_admin():
         # Check if users table exists
         inspector = inspect(session.bind)
         if not inspector.has_table('users'):
-            st.warning("⚠️ Users table doesn't exist. Please initialize database first.")
             return False
         
         # Check if admin exists
@@ -230,7 +229,7 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 # =========================================================
-# LOGIN PAGE
+# LOGIN PAGE - PASSWORD BYPASS ACTIVATED
 # =========================================================
 def login_page():
     st.markdown("""
@@ -238,6 +237,7 @@ def login_page():
         <div class="login-title">
             <h2>💧 Amigoz Water Distilling</h2>
             <p>Enterprise Resource Planning System</p>
+            <p style="color: #ff6b6b; font-size: 12px;">⚠️ Password bypass is ACTIVE - for testing only</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -255,15 +255,24 @@ def login_page():
             username = st.text_input("Username", placeholder="Enter your username", key="login_username")
             password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
             
-            if st.button("🔐 Sign In", key="login_button", use_container_width=True):
-                if username and password:
+            # 🔓🔓🔓 PASSWORD BYPASS - ACCEPT ANY PASSWORD 🔓🔓🔓
+            if st.button("🔐 Sign In (Any Password)", key="login_button", use_container_width=True):
+                if username:
+                    # 🔓 BYPASS - Ignore password, just check if user exists
                     session = get_db_connection()
                     if session:
                         try:
                             # Check if users table exists
                             inspector = inspect(session.bind)
                             if not inspector.has_table('users'):
-                                st.error("❌ Database not initialized. Please run init_db_streamlit.py first.")
+                                # If no users table, create bypass login
+                                st.session_state.authenticated = True
+                                st.session_state.user = username
+                                st.session_state.user_id = 1
+                                st.session_state.role = "Administrator"
+                                st.session_state.full_name = username
+                                st.success("✅ Login successful! (Bypass - No DB)")
+                                st.rerun()
                                 return
                             
                             # Query user
@@ -276,36 +285,71 @@ def login_page():
                             result = session.execute(query, {"username": username}).fetchone()
                             
                             if result:
-                                stored_hash = result.password_hash
-                                if verify_password(password, stored_hash):
-                                    st.session_state.authenticated = True
-                                    st.session_state.user = result.username
-                                    st.session_state.user_id = result.id
-                                    st.session_state.role = result.role_name or "User"
-                                    st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
-                                    
-                                    # Update last login
-                                    try:
-                                        update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
-                                        session.execute(update_query, {"user_id": result.id})
-                                        session.commit()
-                                    except:
-                                        pass
-                                    
-                                    st.success("✅ Login successful!")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Invalid username or password")
+                                # 🔓 ACCEPT ANY PASSWORD
+                                st.session_state.authenticated = True
+                                st.session_state.user = result.username
+                                st.session_state.user_id = result.id
+                                st.session_state.role = result.role_name or "User"
+                                st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
+                                
+                                # Update last login
+                                try:
+                                    update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
+                                    session.execute(update_query, {"user_id": result.id})
+                                    session.commit()
+                                except:
+                                    pass
+                                
+                                st.success("✅ Login successful! (Password bypassed)")
+                                st.rerun()
                             else:
-                                st.error("❌ Invalid username or password")
+                                # User not found - create temporary session
+                                st.session_state.authenticated = True
+                                st.session_state.user = username
+                                st.session_state.user_id = 1
+                                st.session_state.role = "Administrator"
+                                st.session_state.full_name = username
+                                st.success("✅ Login successful! (Bypass - User created)")
+                                st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Login error: {str(e)}")
+                            # If any error, bypass anyway
+                            st.session_state.authenticated = True
+                            st.session_state.user = username or "admin"
+                            st.session_state.user_id = 1
+                            st.session_state.role = "Administrator"
+                            st.session_state.full_name = username or "Admin"
+                            st.success("✅ Login successful! (Error bypass)")
+                            st.rerun()
                         finally:
                             session.close()
                     else:
-                        st.error("❌ Database connection failed")
+                        # No database - direct bypass
+                        st.session_state.authenticated = True
+                        st.session_state.user = username
+                        st.session_state.user_id = 1
+                        st.session_state.role = "Administrator"
+                        st.session_state.full_name = username
+                        st.success("✅ Login successful! (No DB)")
+                        st.rerun()
                 else:
-                    st.warning("⚠️ Please enter both username and password")
+                    st.warning("⚠️ Please enter a username")
+            
+            # 🔓🔓🔓 DIRECT BYPASS - Skip everything 🔓🔓🔓
+            if st.button("🚪 Quick Bypass (No Login)", key="bypass_button", use_container_width=True):
+                st.session_state.authenticated = True
+                st.session_state.user = "admin"
+                st.session_state.user_id = 1
+                st.session_state.role = "Administrator"
+                st.session_state.full_name = "System Administrator"
+                st.success("✅ Bypass login successful!")
+                st.rerun()
+            
+            st.markdown("""
+            <p style="text-align: center; color: #888; font-size: 12px; margin-top: 20px;">
+                🔓 Password check is disabled for testing<br>
+                Any username works, any password works
+            </p>
+            """, unsafe_allow_html=True)
 
 # =========================================================
 # SIDEBAR NAVIGATION
@@ -316,6 +360,7 @@ def sidebar_navigation():
         <div style="padding: 20px 0; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1);">
             <h3 style="color: white; margin: 0;">💧 Amigoz ERP</h3>
             <p style="color: rgba(255,255,255,0.6); font-size: 12px; margin: 5px 0 0;">Version 1.0.0</p>
+            <p style="color: #ff6b6b; font-size: 10px; margin: 5px 0 0;">🔓 Bypass Mode</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -385,6 +430,9 @@ def sidebar_navigation():
 # =========================================================
 def dashboard_page():
     st.markdown("<h2 style='margin-bottom: 30px;'>📊 Dashboard</h2>", unsafe_allow_html=True)
+    
+    # Show bypass warning
+    st.warning("🔓 Password bypass is active - This is for testing only!")
     
     session = get_db_connection()
     product_count = 0
