@@ -22,41 +22,28 @@ st.set_page_config(
 )
 
 # =========================================================
-# DB CONNECTION
+# DB CONNECTION - FIXED
 # =========================================================
-def get_conn():
-    """Get database connection - works on both local and Streamlit Cloud"""
-    
-    # Check if we're on Streamlit Cloud with a DATABASE_URL secret
-    database_url = st.secrets.get("DATABASE_URL")
-    
-    if database_url:
-        # Running on Streamlit Cloud - use PostgreSQL
-        try:
-            # Ensure SSL is enabled for Neon
-            if "sslmode" not in database_url:
-                if "?" in database_url:
-                    database_url += "&sslmode=require"
-                else:
-                    database_url += "?sslmode=require"
-            
-            conn = psycopg2.connect(
-                database_url,
-                connect_timeout=30,
-                keepalives=1,
-                keepalives_idle=5,
-                keepalives_interval=2,
-                keepalives_count=2
-            )
-            return conn
-            
-        except Exception as e:
-            st.error(f"❌ Database connection failed: {e}")
-            return None
-    else:
-        # Running locally - use SQLite
-        return sqlite3.connect("ecde.db", check_same_thread=False)
-
+def get_db_connection():
+    """Get database connection using SQLAlchemy"""
+    try:
+        # Check for DATABASE_URL in secrets (Streamlit Cloud) or environment
+        database_url = st.secrets.get("DATABASE_URL") or os.getenv("DATABASE_URL")
+        
+        if database_url:
+            # Use PostgreSQL (Streamlit Cloud)
+            engine = create_engine(database_url, pool_pre_ping=True)
+            Session = sessionmaker(bind=engine)
+            return Session()
+        else:
+            # Fallback to SQLite for local development
+            # Create SQLite engine
+            engine = create_engine('sqlite:///wb_erp.db', connect_args={'check_same_thread': False})
+            Session = sessionmaker(bind=engine)
+            return Session()
+    except Exception as e:
+        st.error(f"❌ Database connection error: {str(e)}")
+        return None
 
 # Authentication functions
 def hash_password(password):
@@ -71,12 +58,24 @@ def init_session_state():
         st.session_state.authenticated = False
     if 'user' not in st.session_state:
         st.session_state.user = None
+    if 'user_id' not in st.session_state:
+        st.session_state.user_id = None
     if 'role' not in st.session_state:
         st.session_state.role = None
+    if 'full_name' not in st.session_state:
+        st.session_state.full_name = None
     if 'theme' not in st.session_state:
         st.session_state.theme = 'light'
     if 'page' not in st.session_state:
         st.session_state.page = 'Dashboard'
+    if 'show_add_user' not in st.session_state:
+        st.session_state.show_add_user = False
+    if 'show_add_product' not in st.session_state:
+        st.session_state.show_add_product = False
+    if 'show_add_supplier' not in st.session_state:
+        st.session_state.show_add_supplier = False
+    if 'show_add_customer' not in st.session_state:
+        st.session_state.show_add_customer = False
 
 # Custom CSS
 def apply_custom_css():
@@ -217,40 +216,43 @@ def login_page():
         with col2:
             username = st.text_input("Username", placeholder="Enter your username", key="login_username")
             password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
-            remember = st.checkbox("Remember me", key="login_remember")
             
             if st.button("Sign In", key="login_button", use_container_width=True):
                 if username and password:
-                    # Authenticate user
                     session = get_db_connection()
-                    try:
-                        query = text("""
-                            SELECT u.*, r.name as role_name 
-                            FROM users u
-                            LEFT JOIN roles r ON u.role_id = r.id
-                            WHERE u.username = :username AND u.is_active = true
-                        """)
-                        result = session.execute(query, {"username": username}).fetchone()
-                        
-                        if result and verify_password(password, result.password_hash):
-                            st.session_state.authenticated = True
-                            st.session_state.user = result.username
-                            st.session_state.user_id = result.id
-                            st.session_state.role = result.role_name
-                            st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
+                    if session:
+                        try:
+                            # Using SQLAlchemy text() for raw SQL
+                            query = text("""
+                                SELECT u.*, r.name as role_name 
+                                FROM users u
+                                LEFT JOIN roles r ON u.role_id = r.id
+                                WHERE u.username = :username AND u.is_active = true
+                            """)
+                            result = session.execute(query, {"username": username}).fetchone()
                             
-                            # Update last login
-                            update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
-                            session.execute(update_query, {"user_id": result.id})
-                            session.commit()
-                            
-                            st.rerun()
-                        else:
-                            st.error("❌ Invalid username or password")
-                    except Exception as e:
-                        st.error(f"Database error: {str(e)}")
-                    finally:
-                        session.close()
+                            if result and verify_password(password, result.password_hash):
+                                st.session_state.authenticated = True
+                                st.session_state.user = result.username
+                                st.session_state.user_id = result.id
+                                st.session_state.role = result.role_name
+                                st.session_state.full_name = f"{result.first_name} {result.last_name}".strip() or result.username
+                                
+                                # Update last login
+                                update_query = text("UPDATE users SET last_login = NOW() WHERE id = :user_id")
+                                session.execute(update_query, {"user_id": result.id})
+                                session.commit()
+                                
+                                st.success("✅ Login successful!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Invalid username or password")
+                        except Exception as e:
+                            st.error(f"Database error: {str(e)}")
+                        finally:
+                            session.close()
+                    else:
+                        st.error("❌ Database connection failed")
                 else:
                     st.warning("Please enter both username and password")
 
@@ -282,7 +284,7 @@ def sidebar_navigation():
             </div>
             """, unsafe_allow_html=True)
         
-        # Navigation - Using simple buttons instead of option_menu
+        # Navigation - Using simple buttons
         st.markdown("### Navigation")
         
         pages = {
@@ -323,7 +325,9 @@ def sidebar_navigation():
         if st.button("🚪 Logout", key="logout_button", use_container_width=True):
             st.session_state.authenticated = False
             st.session_state.user = None
+            st.session_state.user_id = None
             st.session_state.role = None
+            st.session_state.full_name = None
             st.rerun()
     
     return st.session_state.page
@@ -334,42 +338,54 @@ def dashboard_page():
     
     # Get real data from database
     session = get_db_connection()
-    try:
-        # Get counts
-        product_count = session.execute(text("SELECT COUNT(*) FROM products WHERE is_active = true")).scalar()
-        supplier_count = session.execute(text("SELECT COUNT(*) FROM suppliers WHERE is_active = true")).scalar()
-        customer_count = session.execute(text("SELECT COUNT(*) FROM customers WHERE is_active = true")).scalar()
-        user_count = session.execute(text("SELECT COUNT(*) FROM users WHERE is_active = true")).scalar()
-        
-        # Low stock products
-        low_stock = session.execute(text("""
-            SELECT COUNT(*) FROM products 
-            WHERE current_stock <= min_stock_level AND is_active = true
-        """)).scalar()
-        
-        # Total stock value
-        total_stock_value = session.execute(text("""
-            SELECT COALESCE(SUM(current_stock * unit_price), 0) 
-            FROM products WHERE is_active = true
-        """)).scalar()
-        
-        # Recent transactions
-        recent_transactions = session.execute(text("""
-            SELECT 
-                st.created_at,
-                p.name as product_name,
-                st.transaction_type,
-                st.quantity,
-                u.username as user_name
-            FROM stock_transactions st
-            JOIN products p ON st.product_id = p.id
-            LEFT JOIN users u ON st.created_by = u.id
-            ORDER BY st.created_at DESC
-            LIMIT 10
-        """)).fetchall()
-        
-    except Exception as e:
-        st.warning(f"Could not fetch data: {str(e)}. Using demo data.")
+    if session:
+        try:
+            # Get counts
+            product_count = session.execute(text("SELECT COUNT(*) FROM products WHERE is_active = true")).scalar() or 0
+            supplier_count = session.execute(text("SELECT COUNT(*) FROM suppliers WHERE is_active = true")).scalar() or 0
+            customer_count = session.execute(text("SELECT COUNT(*) FROM customers WHERE is_active = true")).scalar() or 0
+            user_count = session.execute(text("SELECT COUNT(*) FROM users WHERE is_active = true")).scalar() or 0
+            
+            # Low stock products
+            low_stock = session.execute(text("""
+                SELECT COUNT(*) FROM products 
+                WHERE current_stock <= min_stock_level AND is_active = true
+            """)).scalar() or 0
+            
+            # Total stock value
+            total_stock_value = session.execute(text("""
+                SELECT COALESCE(SUM(current_stock * unit_price), 0) 
+                FROM products WHERE is_active = true
+            """)).scalar() or 0
+            
+            # Recent transactions
+            recent_transactions = session.execute(text("""
+                SELECT 
+                    st.created_at,
+                    p.name as product_name,
+                    st.transaction_type,
+                    st.quantity,
+                    u.username as user_name
+                FROM stock_transactions st
+                JOIN products p ON st.product_id = p.id
+                LEFT JOIN users u ON st.created_by = u.id
+                ORDER BY st.created_at DESC
+                LIMIT 10
+            """)).fetchall()
+            
+        except Exception as e:
+            st.warning(f"⚠️ Could not fetch data: {str(e)}")
+            product_count = 45
+            supplier_count = 12
+            customer_count = 89
+            user_count = 15
+            low_stock = 8
+            total_stock_value = 125000.00
+            recent_transactions = []
+        finally:
+            session.close()
+    else:
+        # Demo data if database not available
         product_count = 45
         supplier_count = 12
         customer_count = 89
@@ -377,9 +393,6 @@ def dashboard_page():
         low_stock = 8
         total_stock_value = 125000.00
         recent_transactions = []
-    
-    finally:
-        session.close()
     
     # KPI Cards - Row 1
     col1, col2, col3, col4, col5, col6 = st.columns(6)
@@ -439,7 +452,6 @@ def dashboard_page():
     
     with col1:
         st.markdown("<h4>📊 Production Trends</h4>", unsafe_allow_html=True)
-        # Sample production data
         days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         production_data = [1200, 1900, 1500, 2100, 1800, 1400, 1600]
         
@@ -467,7 +479,6 @@ def dashboard_page():
     
     with col2:
         st.markdown("<h4>💰 Sales Overview</h4>", unsafe_allow_html=True)
-        # Sample sales data
         sales_data = [5000, 7500, 6000, 9000, 8500, 5500, 7000]
         
         fig = go.Figure()
@@ -505,7 +516,7 @@ def dashboard_page():
             hide_index=True
         )
     else:
-        st.info("No recent transactions found")
+        st.info("ℹ️ No recent transactions found")
 
 # User Management page
 def user_management_page():
@@ -515,7 +526,7 @@ def user_management_page():
     col1, col2 = st.columns([6, 1])
     with col2:
         if st.button("➕ Add User", key="add_user_btn", use_container_width=True):
-            st.session_state.show_add_user = True
+            st.session_state.show_add_user = not st.session_state.show_add_user
     
     # Add user form
     if st.session_state.get('show_add_user', False):
@@ -533,11 +544,17 @@ def user_management_page():
                     
                     # Get roles
                     session = get_db_connection()
-                    roles = session.execute(text("SELECT id, name FROM roles WHERE is_active = true")).fetchall()
-                    session.close()
+                    roles = []
+                    if session:
+                        try:
+                            roles = session.execute(text("SELECT id, name FROM roles WHERE is_active = true")).fetchall()
+                        except:
+                            pass
+                        finally:
+                            session.close()
                     
-                    role_options = {r.name: r.id for r in roles}
-                    selected_role = st.selectbox("Role", list(role_options.keys()))
+                    role_options = {r.name: r.id for r in roles} if roles else {}
+                    selected_role = st.selectbox("Role", list(role_options.keys()) if role_options else ["Administrator"])
                     is_active = st.checkbox("Active", value=True)
                     is_superuser = st.checkbox("Superuser (Full Access)", value=False)
                 
@@ -545,74 +562,73 @@ def user_management_page():
                 if submitted:
                     if username and email and password:
                         session = get_db_connection()
-                        try:
-                            hashed_pw = hash_password(password)
-                            query = text("""
-                                INSERT INTO users 
-                                (username, email, password_hash, first_name, last_name, phone, 
-                                 role_id, is_active, is_superuser, created_at)
-                                VALUES 
-                                (:username, :email, :password_hash, :first_name, :last_name, :phone,
-                                 :role_id, :is_active, :is_superuser, NOW())
-                            """)
-                            session.execute(query, {
-                                "username": username,
-                                "email": email,
-                                "password_hash": hashed_pw,
-                                "first_name": first_name,
-                                "last_name": last_name,
-                                "phone": phone,
-                                "role_id": role_options[selected_role],
-                                "is_active": is_active,
-                                "is_superuser": is_superuser
-                            })
-                            session.commit()
-                            st.success("✅ User created successfully!")
-                            st.session_state.show_add_user = False
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error creating user: {str(e)}")
-                        finally:
-                            session.close()
+                        if session:
+                            try:
+                                hashed_pw = hash_password(password)
+                                query = text("""
+                                    INSERT INTO users 
+                                    (username, email, password_hash, first_name, last_name, phone, 
+                                     role_id, is_active, is_superuser, created_at)
+                                    VALUES 
+                                    (:username, :email, :password_hash, :first_name, :last_name, :phone,
+                                     :role_id, :is_active, :is_superuser, NOW())
+                                """)
+                                session.execute(query, {
+                                    "username": username,
+                                    "email": email,
+                                    "password_hash": hashed_pw,
+                                    "first_name": first_name,
+                                    "last_name": last_name,
+                                    "phone": phone,
+                                    "role_id": role_options.get(selected_role),
+                                    "is_active": is_active,
+                                    "is_superuser": is_superuser
+                                })
+                                session.commit()
+                                st.success("✅ User created successfully!")
+                                st.session_state.show_add_user = False
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error creating user: {str(e)}")
+                            finally:
+                                session.close()
                     else:
-                        st.warning("Please fill in all required fields (*)")
+                        st.warning("⚠️ Please fill in all required fields (*)")
     
     # Display users
     session = get_db_connection()
-    try:
-        users = session.execute(text("""
-            SELECT 
-                u.id, u.username, u.email, u.first_name, u.last_name, u.phone,
-                u.is_active, u.is_superuser, u.last_login, u.created_at,
-                r.name as role_name
-            FROM users u
-            LEFT JOIN roles r ON u.role_id = r.id
-            ORDER BY u.created_at DESC
-        """)).fetchall()
-    except Exception as e:
-        st.error(f"Error fetching users: {str(e)}")
-        users = []
-    finally:
-        session.close()
+    users = []
+    if session:
+        try:
+            users = session.execute(text("""
+                SELECT 
+                    u.username, u.email, u.first_name, u.last_name,
+                    u.is_active, u.is_superuser, u.last_login,
+                    r.name as role_name
+                FROM users u
+                LEFT JOIN roles r ON u.role_id = r.id
+                ORDER BY u.created_at DESC
+            """)).fetchall()
+        except:
+            pass
+        finally:
+            session.close()
     
     if users:
         df = pd.DataFrame(users, columns=[
-            'ID', 'Username', 'Email', 'First Name', 'Last Name', 'Phone',
-            'Active', 'Superuser', 'Last Login', 'Created At', 'Role'
+            'Username', 'Email', 'First Name', 'Last Name',
+            'Active', 'Superuser', 'Last Login', 'Role'
         ])
-        
-        # Format dates
-        df['Last Login'] = pd.to_datetime(df['Last Login']).dt.strftime('%Y-%m-%d %H:%M') 
-        df['Created At'] = pd.to_datetime(df['Created At']).dt.strftime('%Y-%m-%d')
+        df['Last Login'] = pd.to_datetime(df['Last Login']).dt.strftime('%Y-%m-%d %H:%M')
         df['Status'] = df['Active'].apply(lambda x: '✅ Active' if x else '❌ Inactive')
         
         st.dataframe(
-            df[['Username', 'Email', 'Role', 'Status', 'Last Login', 'Created At']],
+            df[['Username', 'Email', 'Role', 'Status', 'Last Login']],
             use_container_width=True,
             hide_index=True
         )
     else:
-        st.info("No users found")
+        st.info("ℹ️ No users found")
 
 # Products page
 def products_page():
@@ -624,8 +640,14 @@ def products_page():
         search = st.text_input("🔍 Search Products", placeholder="Search by name or code...")
     with col2:
         session = get_db_connection()
-        categories = session.execute(text("SELECT id, name FROM product_categories WHERE is_active = true")).fetchall()
-        session.close()
+        categories = []
+        if session:
+            try:
+                categories = session.execute(text("SELECT id, name FROM product_categories WHERE is_active = true")).fetchall()
+            except:
+                pass
+            finally:
+                session.close()
         category_options = [""] + [c.name for c in categories]
         category_filter = st.selectbox("Category", category_options)
     with col3:
@@ -633,7 +655,7 @@ def products_page():
     
     # Add product button
     if st.button("➕ Add Product", key="add_product_btn", use_container_width=True):
-        st.session_state.show_add_product = True
+        st.session_state.show_add_product = not st.session_state.show_add_product
     
     # Add product form
     if st.session_state.get('show_add_product', False):
@@ -644,7 +666,7 @@ def products_page():
                     code = st.text_input("Product Code*")
                     name = st.text_input("Product Name*")
                     description = st.text_area("Description")
-                    category = st.selectbox("Category", [""] + [c.name for c in categories])
+                    category = st.selectbox("Category", category_options)
                 with col2:
                     unit = st.selectbox("Unit", ["piece", "kg", "liter", "bottle", "case", "pallet"])
                     unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=0.01)
@@ -657,99 +679,97 @@ def products_page():
                 if submitted:
                     if code and name:
                         session = get_db_connection()
-                        try:
-                            # Get category ID
-                            cat_id = None
-                            if category:
-                                cat_result = session.execute(
-                                    text("SELECT id FROM product_categories WHERE name = :name"),
-                                    {"name": category}
-                                ).fetchone()
-                                if cat_result:
-                                    cat_id = cat_result.id
-                            
-                            query = text("""
-                                INSERT INTO products 
-                                (code, name, description, category_id, unit, unit_price, cost_price,
-                                 min_stock_level, max_stock_level, barcode, is_active, created_at)
-                                VALUES 
-                                (:code, :name, :description, :category_id, :unit, :unit_price, :cost_price,
-                                 :min_stock_level, :max_stock_level, :barcode, true, NOW())
-                            """)
-                            session.execute(query, {
-                                "code": code,
-                                "name": name,
-                                "description": description,
-                                "category_id": cat_id,
-                                "unit": unit,
-                                "unit_price": unit_price,
-                                "cost_price": cost_price,
-                                "min_stock_level": min_stock,
-                                "max_stock_level": max_stock,
-                                "barcode": barcode
-                            })
-                            session.commit()
-                            st.success("✅ Product created successfully!")
-                            st.session_state.show_add_product = False
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error creating product: {str(e)}")
-                        finally:
-                            session.close()
+                        if session:
+                            try:
+                                # Get category ID
+                                cat_id = None
+                                if category:
+                                    cat_result = session.execute(
+                                        text("SELECT id FROM product_categories WHERE name = :name"),
+                                        {"name": category}
+                                    ).fetchone()
+                                    if cat_result:
+                                        cat_id = cat_result.id
+                                
+                                query = text("""
+                                    INSERT INTO products 
+                                    (code, name, description, category_id, unit, unit_price, cost_price,
+                                     min_stock_level, max_stock_level, barcode, is_active, created_at)
+                                    VALUES 
+                                    (:code, :name, :description, :category_id, :unit, :unit_price, :cost_price,
+                                     :min_stock_level, :max_stock_level, :barcode, true, NOW())
+                                """)
+                                session.execute(query, {
+                                    "code": code,
+                                    "name": name,
+                                    "description": description,
+                                    "category_id": cat_id,
+                                    "unit": unit,
+                                    "unit_price": unit_price,
+                                    "cost_price": cost_price,
+                                    "min_stock_level": min_stock,
+                                    "max_stock_level": max_stock,
+                                    "barcode": barcode
+                                })
+                                session.commit()
+                                st.success("✅ Product created successfully!")
+                                st.session_state.show_add_product = False
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error creating product: {str(e)}")
+                            finally:
+                                session.close()
                     else:
-                        st.warning("Please fill in all required fields (*)")
+                        st.warning("⚠️ Please fill in all required fields (*)")
     
     # Get products
     session = get_db_connection()
-    try:
-        query = """
-            SELECT 
-                p.id, p.code, p.name, p.description, p.unit, p.unit_price, p.cost_price,
-                p.current_stock, p.min_stock_level, p.max_stock_level, p.is_active,
-                p.barcode, pc.name as category_name
-            FROM products p
-            LEFT JOIN product_categories pc ON p.category_id = pc.id
-            WHERE 1=1
-        """
-        params = {}
-        
-        if search:
-            query += " AND (p.name ILIKE :search OR p.code ILIKE :search)"
-            params["search"] = f"%{search}%"
-        
-        if category_filter:
-            query += " AND pc.name = :category"
-            params["category"] = category_filter
-        
-        if not show_inactive:
-            query += " AND p.is_active = true"
-        
-        query += " ORDER BY p.name"
-        
-        products = session.execute(text(query), params).fetchall()
-    except Exception as e:
-        st.error(f"Error fetching products: {str(e)}")
-        products = []
-    finally:
-        session.close()
+    products = []
+    if session:
+        try:
+            query = """
+                SELECT 
+                    p.code, p.name, p.unit, p.unit_price,
+                    p.current_stock, p.min_stock_level, p.is_active,
+                    pc.name as category_name
+                FROM products p
+                LEFT JOIN product_categories pc ON p.category_id = pc.id
+                WHERE 1=1
+            """
+            params = {}
+            
+            if search:
+                query += " AND (p.name ILIKE :search OR p.code ILIKE :search)"
+                params["search"] = f"%{search}%"
+            
+            if category_filter:
+                query += " AND pc.name = :category"
+                params["category"] = category_filter
+            
+            if not show_inactive:
+                query += " AND p.is_active = true"
+            
+            query += " ORDER BY p.name"
+            
+            products = session.execute(text(query), params).fetchall()
+        except:
+            pass
+        finally:
+            session.close()
     
     if products:
         df = pd.DataFrame(products, columns=[
-            'ID', 'Code', 'Name', 'Description', 'Unit', 'Unit Price', 'Cost Price',
-            'Stock', 'Min Stock', 'Max Stock', 'Active', 'Barcode', 'Category'
+            'Code', 'Name', 'Unit', 'Unit Price',
+            'Stock', 'Min Stock', 'Active', 'Category'
         ])
         
-        # Add status column
         df['Status'] = df.apply(
             lambda row: '🟢 In Stock' if row['Stock'] > row['Min Stock'] 
             else '🟡 Low Stock' if row['Stock'] > 0 
             else '🔴 Out of Stock',
             axis=1
         )
-        
-        # Format currency
         df['Unit Price'] = df['Unit Price'].apply(lambda x: f"${x:,.2f}" if x else "$0.00")
-        df['Cost Price'] = df['Cost Price'].apply(lambda x: f"${x:,.2f}" if x else "$0.00")
         
         st.dataframe(
             df[['Code', 'Name', 'Category', 'Stock', 'Unit Price', 'Status', 'Active']],
@@ -757,15 +777,14 @@ def products_page():
             hide_index=True
         )
     else:
-        st.info("No products found")
+        st.info("ℹ️ No products found")
 
 # Suppliers page
 def suppliers_page():
     st.markdown("<h2>🏭 Supplier Management</h2>", unsafe_allow_html=True)
     
-    # Add supplier
     if st.button("➕ Add Supplier", key="add_supplier_btn", use_container_width=True):
-        st.session_state.show_add_supplier = True
+        st.session_state.show_add_supplier = not st.session_state.show_add_supplier
     
     if st.session_state.get('show_add_supplier', False):
         with st.expander("Add New Supplier", expanded=True):
@@ -782,9 +801,9 @@ def suppliers_page():
                     payment_terms = st.number_input("Payment Terms (days)", min_value=0, value=30)
                 
                 submitted = st.form_submit_button("Create Supplier")
-                if submitted:
-                    if name:
-                        session = get_db_connection()
+                if submitted and name:
+                    session = get_db_connection()
+                    if session:
                         try:
                             query = text("""
                                 INSERT INTO suppliers 
@@ -806,29 +825,28 @@ def suppliers_page():
                             st.session_state.show_add_supplier = False
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error creating supplier: {str(e)}")
+                            st.error(f"❌ Error: {str(e)}")
                         finally:
                             session.close()
-                    else:
-                        st.warning("Company name is required")
     
     # Get suppliers
     session = get_db_connection()
-    try:
-        suppliers = session.execute(text("""
-            SELECT id, name, contact_person, email, phone, address, tax_number, payment_terms, is_active
-            FROM suppliers
-            WHERE is_active = true
-            ORDER BY name
-        """)).fetchall()
-    except Exception as e:
-        st.error(f"Error fetching suppliers: {str(e)}")
-        suppliers = []
-    finally:
-        session.close()
+    suppliers = []
+    if session:
+        try:
+            suppliers = session.execute(text("""
+                SELECT name, contact_person, email, phone, payment_terms, is_active
+                FROM suppliers
+                WHERE is_active = true
+                ORDER BY name
+            """)).fetchall()
+        except:
+            pass
+        finally:
+            session.close()
     
     if suppliers:
-        df = pd.DataFrame(suppliers, columns=['ID', 'Name', 'Contact', 'Email', 'Phone', 'Address', 'Tax', 'Payment Terms', 'Active'])
+        df = pd.DataFrame(suppliers, columns=['Name', 'Contact', 'Email', 'Phone', 'Payment Terms', 'Active'])
         df['Status'] = df['Active'].apply(lambda x: '✅ Active' if x else '❌ Inactive')
         
         st.dataframe(
@@ -837,15 +855,14 @@ def suppliers_page():
             hide_index=True
         )
     else:
-        st.info("No suppliers found")
+        st.info("ℹ️ No suppliers found")
 
 # Customers page
 def customers_page():
     st.markdown("<h2>👥 Customer Management</h2>", unsafe_allow_html=True)
     
-    # Add customer
     if st.button("➕ Add Customer", key="add_customer_btn", use_container_width=True):
-        st.session_state.show_add_customer = True
+        st.session_state.show_add_customer = not st.session_state.show_add_customer
     
     if st.session_state.get('show_add_customer', False):
         with st.expander("Add New Customer", expanded=True):
@@ -862,9 +879,9 @@ def customers_page():
                     credit_limit = st.number_input("Credit Limit ($)", min_value=0.0, step=100.0)
                 
                 submitted = st.form_submit_button("Create Customer")
-                if submitted:
-                    if name:
-                        session = get_db_connection()
+                if submitted and name:
+                    session = get_db_connection()
+                    if session:
                         try:
                             query = text("""
                                 INSERT INTO customers 
@@ -886,29 +903,28 @@ def customers_page():
                             st.session_state.show_add_customer = False
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error creating customer: {str(e)}")
+                            st.error(f"❌ Error: {str(e)}")
                         finally:
                             session.close()
-                    else:
-                        st.warning("Customer name is required")
     
     # Get customers
     session = get_db_connection()
-    try:
-        customers = session.execute(text("""
-            SELECT id, name, contact_person, email, phone, address, tax_number, credit_limit, current_balance, is_active
-            FROM customers
-            WHERE is_active = true
-            ORDER BY name
-        """)).fetchall()
-    except Exception as e:
-        st.error(f"Error fetching customers: {str(e)}")
-        customers = []
-    finally:
-        session.close()
+    customers = []
+    if session:
+        try:
+            customers = session.execute(text("""
+                SELECT name, contact_person, email, phone, credit_limit, current_balance, is_active
+                FROM customers
+                WHERE is_active = true
+                ORDER BY name
+            """)).fetchall()
+        except:
+            pass
+        finally:
+            session.close()
     
     if customers:
-        df = pd.DataFrame(customers, columns=['ID', 'Name', 'Contact', 'Email', 'Phone', 'Address', 'Tax', 'Credit Limit', 'Balance', 'Active'])
+        df = pd.DataFrame(customers, columns=['Name', 'Contact', 'Email', 'Phone', 'Credit Limit', 'Balance', 'Active'])
         df['Status'] = df['Active'].apply(lambda x: '✅ Active' if x else '❌ Inactive')
         df['Credit Limit'] = df['Credit Limit'].apply(lambda x: f"${x:,.2f}")
         df['Balance'] = df['Balance'].apply(lambda x: f"${x:,.2f}")
@@ -919,7 +935,7 @@ def customers_page():
             hide_index=True
         )
     else:
-        st.info("No customers found")
+        st.info("ℹ️ No customers found")
 
 # Placeholder pages
 def placeholder_page(page_name):
