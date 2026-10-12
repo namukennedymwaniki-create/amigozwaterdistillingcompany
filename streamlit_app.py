@@ -637,7 +637,31 @@ def dashboard_page():
     </style>
     """, unsafe_allow_html=True)
     
-    st.markdown("<h2 style='margin-bottom: 30px; color: #0c4a6e;'>📊 Dashboard</h2>", unsafe_allow_html=True)
+    # =========================================================
+    # WELCOME MESSAGE (MOVED TO TOP - REPLACES HEADER)
+    # =========================================================
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
+        padding: 24px 28px;
+        border-radius: 16px;
+        border-left: 6px solid #0284c7;
+        margin-bottom: 24px;
+        box-shadow: 0 6px 16px rgba(14, 165, 233, 0.2);
+    ">
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span style="font-size: 36px;">✅</span>
+            <div>
+                <h2 style="color: #0c4a6e; margin: 0; font-weight: 700; font-size: 24px;">
+                    Welcome to Amigoz Water Distilling Company ERP System
+                </h2>
+                <p style="color: #0369a1; margin: 6px 0 0; font-size: 15px;">
+                    Your all-in-one solution for managing products, suppliers, customers, and more.
+                </p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Show bypass warning
     st.warning("🔓 Password bypass is active - This is for testing only!")
@@ -757,32 +781,6 @@ def dashboard_page():
             yaxis=dict(gridcolor='rgba(14, 165, 233, 0.1)')
         )
         st.plotly_chart(fig, use_container_width=True)
-    
-    # =========================================================
-    # WELCOME MESSAGE
-    # =========================================================
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
-        padding: 20px 24px;
-        border-radius: 14px;
-        border-left: 6px solid #0284c7;
-        margin-top: 20px;
-        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
-    ">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="font-size: 28px;">✅</span>
-            <div>
-                <h4 style="color: #0c4a6e; margin: 0; font-weight: 700;">
-                    Welcome to Amigoz Water Distilling Company ERP System
-                </h4>
-                <p style="color: #0369a1; margin: 4px 0 0; font-size: 14px;">
-                    Your all-in-one solution for managing products, suppliers, customers, and more.
-                </p>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
 
 # =========================================================
 # PLACEHOLDER PAGES
