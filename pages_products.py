@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
-from database import get_db_connection, log_audit, get_next_code
+from database import get_db_connection, log_audit, get_next_code, read_sql
 
 
 def products_page():
@@ -17,18 +17,12 @@ def products_page():
             background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 50%, #e0f7fa 100%) !important;
         }
         h1, h2, h3, h4, h5, h6 { color: #0c4a6e !important; }
-        div[data-testid="stDataFrame"] {
-            background: white !important;
-            border-radius: 12px !important;
-            border: 1px solid #bae6fd !important;
-        }
     </style>
     """, unsafe_allow_html=True)
     
     st.markdown("<h2 style='color: #0c4a6e;'>📦 Product Register</h2>", unsafe_allow_html=True)
     st.caption("Manage all products — bottled water, sachets, containers, and accessories")
     
-    # Tabs
     tab1, tab2, tab3 = st.tabs(["📋 View Products", "➕ Add Product", "✏️ Edit Product"])
     
     # ============================================
@@ -46,78 +40,69 @@ def products_page():
             st.write("")
             refresh = st.button("🔄 Refresh", use_container_width=True)
         
-        conn = get_db_connection()
-        if not conn:
-            st.error("Cannot connect to database")
-            return
+        query = """
+            SELECT p.id, p.product_code, p.product_name, 
+                   c.name as category, p.size, p.unit,
+                   p.cost_price, p.selling_price,
+                   p.reorder_level, p.is_batch_tracked, p.is_active
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE 1=1
+        """
+        params = {}
         
-        try:
-            query = """
-                SELECT p.id, p.product_code, p.product_name, 
-                       c.name as category, p.size, p.unit,
-                       p.cost_price, p.selling_price,
-                       p.reorder_level, p.is_batch_tracked, p.is_active
-                FROM products p
-                LEFT JOIN product_categories c ON p.category_id = c.id
-                WHERE 1=1
-            """
-            params = {}
+        if search_term:
+            query += " AND (LOWER(p.product_code) LIKE :search OR LOWER(p.product_name) LIKE :search)"
+            params["search"] = f"%{search_term.lower()}%"
+        
+        if filter_active == "Active":
+            query += " AND p.is_active = 1"
+        elif filter_active == "Inactive":
+            query += " AND p.is_active = 0"
+        
+        query += " ORDER BY p.id DESC"
+        
+        df = read_sql(query, params if params else None)
+        
+        if df.empty:
+            st.info("📭 No products yet. Use the '➕ Add Product' tab to create your first product.")
+        else:
+            st.success(f"✅ {len(df)} product(s) found")
             
-            if search_term:
-                query += " AND (LOWER(p.product_code) LIKE :search OR LOWER(p.product_name) LIKE :search)"
-                params["search"] = f"%{search_term.lower()}%"
+            display_df = df.copy()
+            display_df['cost_price'] = display_df['cost_price'].apply(lambda x: f"KES {float(x):,.2f}" if x else "KES 0.00")
+            display_df['selling_price'] = display_df['selling_price'].apply(lambda x: f"KES {float(x):,.2f}" if x else "KES 0.00")
+            display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅ Active" if x else "❌ Inactive")
+            display_df['is_batch_tracked'] = display_df['is_batch_tracked'].apply(lambda x: "Yes" if x else "No")
             
-            if filter_active == "Active":
-                query += " AND p.is_active = 1"
-            elif filter_active == "Inactive":
-                query += " AND p.is_active = 0"
+            display_df = display_df.rename(columns={
+                'product_code': 'Code',
+                'product_name': 'Product Name',
+                'category': 'Category',
+                'size': 'Size',
+                'unit': 'Unit',
+                'cost_price': 'Cost Price',
+                'selling_price': 'Selling Price',
+                'reorder_level': 'Reorder Level',
+                'is_batch_tracked': 'Batch Tracked',
+                'is_active': 'Status',
+            })
             
-            query += " ORDER BY p.id DESC"
+            st.dataframe(
+                display_df[['id', 'Code', 'Product Name', 'Category', 'Size', 'Unit',
+                            'Cost Price', 'Selling Price', 'Reorder Level', 'Batch Tracked', 'Status']],
+                use_container_width=True,
+                hide_index=True,
+                height=400,
+            )
             
-            df = pd.read_sql(text(query), conn, params=params)
-            
-            if df.empty:
-                st.info("📭 No products yet. Use the '➕ Add Product' tab to create your first product.")
-            else:
-                st.success(f"✅ {len(df)} product(s) found")
-                
-                # Format display
-                display_df = df.copy()
-                display_df['cost_price'] = display_df['cost_price'].apply(lambda x: f"KES {float(x):,.2f}" if x else "KES 0.00")
-                display_df['selling_price'] = display_df['selling_price'].apply(lambda x: f"KES {float(x):,.2f}" if x else "KES 0.00")
-                display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅ Active" if x else "❌ Inactive")
-                display_df['is_batch_tracked'] = display_df['is_batch_tracked'].apply(lambda x: "Yes" if x else "No")
-                
-                display_df = display_df.rename(columns={
-                    'product_code': 'Code',
-                    'product_name': 'Product Name',
-                    'category': 'Category',
-                    'size': 'Size',
-                    'unit': 'Unit',
-                    'cost_price': 'Cost Price',
-                    'selling_price': 'Selling Price',
-                    'reorder_level': 'Reorder Level',
-                    'is_batch_tracked': 'Batch Tracked',
-                    'is_active': 'Status',
-                })
-                
-                st.dataframe(
-                    display_df[['id', 'Code', 'Product Name', 'Category', 'Size', 'Unit',
-                                'Cost Price', 'Selling Price', 'Reorder Level', 'Batch Tracked', 'Status']],
-                    use_container_width=True,
-                    hide_index=True,
-                    height=400,
-                )
-                
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "📥 Download CSV",
-                    csv,
-                    f"products_{datetime.now().strftime('%Y%m%d')}.csv",
-                    "text/csv",
-                )
-        finally:
-            conn.close()
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download CSV",
+                csv,
+                f"products_{datetime.now().strftime('%Y%m%d')}.csv",
+                "text/csv",
+            )
     
     # ============================================
     # TAB 2: ADD PRODUCT
@@ -130,8 +115,7 @@ def products_page():
             return
         
         try:
-            # Get categories
-            cats_df = pd.read_sql(text("SELECT id, name FROM product_categories WHERE is_active = 1 ORDER BY name"), conn)
+            cats_df = read_sql("SELECT id, name FROM product_categories WHERE is_active = 1 ORDER BY name")
             cat_options = {row['name']: row['id'] for _, row in cats_df.iterrows()}
             cat_options["— No Category —"] = None
             
@@ -158,11 +142,9 @@ def products_page():
                 submitted = st.form_submit_button("💾 Save Product", type="primary", use_container_width=True)
                 
                 if submitted:
-                    # Validate
                     if not product_code or not product_name:
                         st.error("❌ Product Code and Name are required")
                     else:
-                        # Duplicate check
                         existing = conn.execute(
                             text("SELECT id FROM products WHERE LOWER(product_code) = LOWER(:code)"),
                             {"code": product_code.strip()}
@@ -193,7 +175,7 @@ def products_page():
                                     "size": size,
                                     "unit": unit,
                                     "pack": pack_size,
-                                    "cost": cost_cost if (cost_cost := cost_price) else 0,
+                                    "cost": cost_price,
                                     "price": selling_price,
                                     "reorder": reorder_level,
                                     "reorder_qty": reorder_quantity,
@@ -220,126 +202,119 @@ def products_page():
     with tab3:
         st.markdown("#### ✏️ Edit Product")
         
-        conn = get_db_connection()
-        if not conn:
-            return
+        products_df = read_sql("SELECT id, product_code, product_name FROM products WHERE is_active = 1 ORDER BY product_name")
         
-        try:
-            products_df = pd.read_sql(
-                text("SELECT id, product_code, product_name FROM products WHERE is_active = 1 ORDER BY product_name"),
-                conn
-            )
+        if products_df.empty:
+            st.info("No active products to edit.")
+        else:
+            options = {f"{row['product_code']} — {row['product_name']}": row['id']
+                       for _, row in products_df.iterrows()}
             
-            if products_df.empty:
-                st.info("No active products to edit.")
-            else:
-                options = {f"{row['product_code']} — {row['product_name']}": row['id']
-                           for _, row in products_df.iterrows()}
+            selected = st.selectbox("Select Product", list(options.keys()), key="edit_prod_select")
+            selected_id = options[selected]
+            
+            product_df = read_sql("SELECT * FROM products WHERE id = :id", {"id": selected_id})
+            
+            if not product_df.empty:
+                p = product_df.iloc[0]
                 
-                selected = st.selectbox("Select Product", list(options.keys()), key="edit_prod_select")
-                selected_id = options[selected]
+                cats_df = read_sql("SELECT id, name FROM product_categories WHERE is_active = 1 ORDER BY name")
+                cat_options = {row['name']: row['id'] for _, row in cats_df.iterrows()}
+                cat_options["— No Category —"] = None
                 
-                product_df = pd.read_sql(
-                    text("SELECT * FROM products WHERE id = :id"),
-                    conn, params={"id": selected_id}
-                )
+                current_cat_name = "— No Category —"
+                for name, cid in cat_options.items():
+                    if cid == p['category_id']:
+                        current_cat_name = name
+                        break
                 
-                if not product_df.empty:
-                    p = product_df.iloc[0]
+                with st.form("edit_product_form"):
+                    col1, col2 = st.columns(2)
                     
-                    cats_df = pd.read_sql(text("SELECT id, name FROM product_categories WHERE is_active = 1 ORDER BY name"), conn)
-                    cat_options = {row['name']: row['id'] for _, row in cats_df.iterrows()}
-                    cat_options["— No Category —"] = None
+                    with col1:
+                        st.text_input("Product Code", value=p['product_code'], disabled=True)
+                        product_name = st.text_input("Product Name *", value=p['product_name'])
+                        category = st.selectbox("Category", list(cat_options.keys()),
+                                                index=list(cat_options.keys()).index(current_cat_name))
+                        size = st.text_input("Size", value=p['size'] or "")
+                        unit = st.text_input("Unit", value=p['unit'] or "pcs")
                     
-                    current_cat_name = "— No Category —"
-                    for name, cid in cat_options.items():
-                        if cid == p['category_id']:
-                            current_cat_name = name
-                            break
+                    with col2:
+                        pack_size = st.number_input("Pack Size", min_value=1, value=int(p['pack_size'] or 1))
+                        cost_price = st.number_input("Cost Price (KES)", min_value=0.0,
+                                                     value=float(p['cost_price'] or 0), step=0.50, format="%.2f")
+                        selling_price = st.number_input("Selling Price (KES)", min_value=0.0,
+                                                        value=float(p['selling_price'] or 0), step=0.50, format="%.2f")
+                        reorder_level = st.number_input("Reorder Level", min_value=0, value=int(p['reorder_level'] or 0))
+                        reorder_quantity = st.number_input("Reorder Quantity", min_value=0, value=int(p['reorder_quantity'] or 0))
                     
-                    with st.form("edit_product_form"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.text_input("Product Code", value=p['product_code'], disabled=True)
-                            product_name = st.text_input("Product Name *", value=p['product_name'])
-                            category = st.selectbox("Category", list(cat_options.keys()),
-                                                    index=list(cat_options.keys()).index(current_cat_name))
-                            size = st.text_input("Size", value=p['size'] or "")
-                            unit = st.text_input("Unit", value=p['unit'] or "pcs")
-                        
-                        with col2:
-                            pack_size = st.number_input("Pack Size", min_value=1, value=int(p['pack_size'] or 1))
-                            cost_price = st.number_input("Cost Price (KES)", min_value=0.0,
-                                                         value=float(p['cost_price'] or 0), step=0.50, format="%.2f")
-                            selling_price = st.number_input("Selling Price (KES)", min_value=0.0,
-                                                            value=float(p['selling_price'] or 0), step=0.50, format="%.2f")
-                            reorder_level = st.number_input("Reorder Level", min_value=0, value=int(p['reorder_level'] or 0))
-                            reorder_quantity = st.number_input("Reorder Quantity", min_value=0, value=int(p['reorder_quantity'] or 0))
-                        
-                        description = st.text_area("Description", value=p['description'] or "", height=80)
-                        is_batch_tracked = st.checkbox("Batch Tracked", value=bool(p['is_batch_tracked']))
-                        is_active = st.checkbox("Active", value=bool(p['is_active']))
-                        
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
-                        with col_b:
-                            delete = st.form_submit_button("🗑️ Deactivate", use_container_width=True)
-                        
-                        if save:
-                            try:
-                                conn.execute(text("""
-                                    UPDATE products SET
-                                        product_name = :name,
-                                        category_id = :cat,
-                                        size = :size,
-                                        unit = :unit,
-                                        pack_size = :pack,
-                                        cost_price = :cost,
-                                        selling_price = :price,
-                                        reorder_level = :reorder,
-                                        reorder_quantity = :reorder_qty,
-                                        is_batch_tracked = :batch,
-                                        is_active = :active,
-                                        description = :desc,
-                                        updated_at = CURRENT_TIMESTAMP
-                                    WHERE id = :id
-                                """), {
-                                    "name": product_name,
-                                    "cat": cat_options[category],
-                                    "size": size,
-                                    "unit": unit,
-                                    "pack": pack_size,
-                                    "cost": cost_price,
-                                    "price": selling_price,
-                                    "reorder": reorder_level,
-                                    "reorder_qty": reorder_quantity,
-                                    "batch": is_batch_tracked,
-                                    "active": is_active,
-                                    "desc": description,
-                                    "id": selected_id,
-                                })
-                                conn.commit()
-                                log_audit("UPDATE_PRODUCT", "products", selected_id)
-                                st.success("✅ Product updated!")
-                                st.rerun()
-                            except Exception as e:
-                                conn.rollback()
-                                st.error(f"❌ Error: {e}")
-                        
-                        if delete:
-                            try:
-                                conn.execute(
-                                    text("UPDATE products SET is_active = 0 WHERE id = :id"),
-                                    {"id": selected_id}
-                                )
-                                conn.commit()
-                                log_audit("DEACTIVATE_PRODUCT", "products", selected_id)
-                                st.success("✅ Product deactivated")
-                                st.rerun()
-                            except Exception as e:
-                                conn.rollback()
-                                st.error(f"❌ Error: {e}")
-        finally:
-            conn.close()
+                    description = st.text_area("Description", value=p['description'] or "", height=80)
+                    is_batch_tracked = st.checkbox("Batch Tracked", value=bool(p['is_batch_tracked']))
+                    is_active = st.checkbox("Active", value=bool(p['is_active']))
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        save = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+                    with col_b:
+                        delete = st.form_submit_button("🗑️ Deactivate", use_container_width=True)
+                    
+                    if save:
+                        conn = get_db_connection()
+                        try:
+                            conn.execute(text("""
+                                UPDATE products SET
+                                    product_name = :name,
+                                    category_id = :cat,
+                                    size = :size,
+                                    unit = :unit,
+                                    pack_size = :pack,
+                                    cost_price = :cost,
+                                    selling_price = :price,
+                                    reorder_level = :reorder,
+                                    reorder_quantity = :reorder_qty,
+                                    is_batch_tracked = :batch,
+                                    is_active = :active,
+                                    description = :desc,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = :id
+                            """), {
+                                "name": product_name,
+                                "cat": cat_options[category],
+                                "size": size,
+                                "unit": unit,
+                                "pack": pack_size,
+                                "cost": cost_price,
+                                "price": selling_price,
+                                "reorder": reorder_level,
+                                "reorder_qty": reorder_quantity,
+                                "batch": is_batch_tracked,
+                                "active": is_active,
+                                "desc": description,
+                                "id": selected_id,
+                            })
+                            conn.commit()
+                            log_audit("UPDATE_PRODUCT", "products", selected_id)
+                            st.success("✅ Product updated!")
+                            st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"❌ Error: {e}")
+                        finally:
+                            conn.close()
+                    
+                    if delete:
+                        conn = get_db_connection()
+                        try:
+                            conn.execute(
+                                text("UPDATE products SET is_active = 0 WHERE id = :id"),
+                                {"id": selected_id}
+                            )
+                            conn.commit()
+                            log_audit("DEACTIVATE_PRODUCT", "products", selected_id)
+                            st.success("✅ Product deactivated")
+                            st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"❌ Error: {e}")
+                        finally:
+                            conn.close()
