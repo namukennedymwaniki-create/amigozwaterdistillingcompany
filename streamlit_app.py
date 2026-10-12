@@ -12,6 +12,8 @@ import os
 import hashlib
 from pages_inventory import inventory_page
 from pages_quality import quality_page
+from pages_customers import customers_page
+from pages_sales import sales_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -430,6 +432,10 @@ def main():
     if not st.session_state.db_initialized:
         with st.spinner("🔧 Initializing database..."):
             if initialize_database():
+                # Run stage migrations
+                from database_migrations import run_migrations
+                run_migrations()
+                
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
             else:
@@ -448,15 +454,19 @@ def main():
         dashboard_page()
     elif selected_page == "Products":
         products_page()
+    elif selected_page == "Customers":
+        customers_page()
     elif selected_page == "Inventory":
         inventory_page()
     elif selected_page == "Quality Control":
         quality_page()
+    elif selected_page == "Sales":
+        sales_page()
     elif selected_page == "Settings":
         settings_page()
-    elif selected_page in ["User Management", "Suppliers", "Customers",
+    elif selected_page in ["User Management", "Suppliers",
                             "Procurement", "Production",
-                            "Sales", "Finance", "Reports"]:
+                            "Finance", "Reports"]:
         placeholder_page(selected_page)
     else:
         dashboard_page()
