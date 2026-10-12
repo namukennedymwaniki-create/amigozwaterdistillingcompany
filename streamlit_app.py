@@ -481,6 +481,16 @@ def main():
     # ============================================
     # ROUTER
     # ============================================
+    if selected_page == "Dashboard":
+        dashboard_page()
+    elif selected_page == "Products":
+        products_page()
+    elif selected_page == "Customers":
+        customers_page()
+    elif selected_page == "Inventory":
+        inventory_page()
+    elif selected_page == "Quality Control":
+        quality_page()
     elif selected_page == "Warehouse":
         warehouse_page()
     elif selected_page == "Deliveries":
