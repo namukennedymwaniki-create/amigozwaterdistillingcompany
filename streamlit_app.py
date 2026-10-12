@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
 import hashlib
+from pages_inventory import inventory_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -446,10 +447,12 @@ def main():
         dashboard_page()
     elif selected_page == "Products":
         products_page()
+    elif selected_page == "Inventory":
+        inventory_page()
     elif selected_page == "Settings":
         settings_page()
     elif selected_page in ["User Management", "Suppliers", "Customers",
-                            "Inventory", "Procurement", "Production",
+                            "Procurement", "Production",
                             "Quality Control", "Sales", "Finance", "Reports"]:
         placeholder_page(selected_page)
     else:
