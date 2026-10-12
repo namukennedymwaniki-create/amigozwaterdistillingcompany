@@ -1,5 +1,6 @@
 # pages_users.py
 # User Management UI
+# Complete file with empty-role guards, safe role dropdowns, and profile handling.
 
 import streamlit as st
 import pandas as pd
@@ -27,7 +28,6 @@ def users_page():
 
     role = st.session_state.get('role') or 'Viewer'
     is_admin = role == 'Administrator'
-    is_md = role == 'Managing Director'
     can_manage = is_admin  # Only Administrator can create/edit
 
     tabs = ["📋 Users", "➕ Add User", "✏️ Edit User", "🛡️ Roles", "🔑 My Profile"]
@@ -45,21 +45,24 @@ def users_page():
         with col2:
             roles_df = get_roles(active_only=False)
             role_opts = {"All Roles": None}
-            role_opts.update({r['name']: r['id'] for _, r in roles_df.iterrows()})
+            if not roles_df.empty:
+                role_opts.update({r['name']: r['id'] for _, r in roles_df.iterrows()})
             role_sel = st.selectbox("Role", list(role_opts.keys()), key="usr_role_filter")
         with col3:
             active_only = st.checkbox("Active only", value=False, key="usr_active_only")
 
         df = get_users(search=search or None,
-                       role_id=role_opts[role_sel],
+                       role_id=role_opts.get(role_sel),
                        active_only=active_only)
 
         if df.empty:
             st.info("No users match the filter.")
         else:
-            # KPI cards
             total = len(df)
-            active = int((df['is_active'] == True).sum()) if 'is_active' in df.columns else 0
+            try:
+                active = int((df['is_active'] == True).sum())
+            except Exception:
+                active = 0
             c1, c2, c3 = st.columns(3)
             with c1: st.metric("Total Users", total)
             with c2: st.metric("Active", active)
@@ -68,19 +71,28 @@ def users_page():
             st.markdown("---")
 
             display = df.copy()
-            display['last_login'] = display['last_login'].astype(str).replace('None', '—')
-            display['is_active'] = display['is_active'].apply(lambda x: "✅ Active" if x else "❌ Inactive")
-            display['must_change_password'] = display['must_change_password'].apply(
-                lambda x: "🔑 Temp" if x else ""
-            )
+            if 'last_login' in display.columns:
+                display['last_login'] = display['last_login'].astype(str).replace('None', '—')
+            if 'is_active' in display.columns:
+                display['is_active'] = display['is_active'].apply(
+                    lambda x: "✅ Active" if x else "❌ Inactive"
+                )
+            if 'must_change_password' in display.columns:
+                display['must_change_password'] = display['must_change_password'].apply(
+                    lambda x: "🔑 Temp" if x else ""
+                )
             display['full_name'] = display.apply(
-                lambda r: f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or '—',
+                lambda r: f"{r.get('first_name') or ''} {r.get('last_name') or ''}".strip() or '—',
                 axis=1,
             )
-            display = display[['id', 'username', 'full_name', 'email', 'phone',
-                              'role_name', 'is_active', 'must_change_password', 'last_login']]
-            display.columns = ['ID', 'Username', 'Name', 'Email', 'Phone',
-                              'Role', 'Status', 'Temp Pwd', 'Last Login']
+            cols_wanted = ['id', 'username', 'full_name', 'email', 'phone',
+                           'role_name', 'is_active', 'must_change_password', 'last_login']
+            cols_present = [c for c in cols_wanted if c in display.columns]
+            display = display[cols_present]
+            display.columns = [
+                'ID', 'Username', 'Name', 'Email', 'Phone',
+                'Role', 'Status', 'Temp Pwd', 'Last Login'
+            ][:len(cols_present)]
             st.dataframe(display, use_container_width=True, hide_index=True, height=400)
 
             csv = df.to_csv(index=False).encode('utf-8')
@@ -88,7 +100,6 @@ def users_page():
                               f"users_{datetime.now().strftime('%Y%m%d')}.csv",
                               "text/csv")
 
-            # User count by role
             st.markdown("---")
             st.markdown("#### 👥 Users by Role")
             by_role = get_users_count_by_role()
@@ -105,66 +116,71 @@ def users_page():
             st.warning("⚠️ Only Administrator can create users.")
         else:
             roles_df = get_roles(active_only=True)
-            role_opts = {r['name']: r['id'] for _, r in roles_df.iterrows()}
+            if roles_df.empty:
+                st.error("⚠️ No roles defined yet. Create a role in the **🛡️ Roles** tab first.")
+            else:
+                role_opts = {r['name']: r['id'] for _, r in roles_df.iterrows()}
 
-            with st.form("add_user_form"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    username = st.text_input("Username *", placeholder="e.g., jdoe")
-                    first_name = st.text_input("First Name")
-                    email = st.text_input("Email")
-                    phone = st.text_input("Phone")
-                with c2:
-                    last_name = st.text_input("Last Name")
-                    role_sel = st.selectbox("Role *", list(role_opts.keys()),
-                                          key="add_usr_role")
-                    is_superuser = st.checkbox("Superuser (full access)", value=False)
-                    force_change = st.checkbox("Force password change on first login",
-                                             value=True)
+                with st.form("add_user_form"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        username = st.text_input("Username *", placeholder="e.g., jdoe")
+                        first_name = st.text_input("First Name")
+                        email = st.text_input("Email")
+                        phone = st.text_input("Phone")
+                    with c2:
+                        last_name = st.text_input("Last Name")
+                        role_sel = st.selectbox("Role *", list(role_opts.keys()),
+                                              key="add_usr_role")
+                        is_superuser = st.checkbox("Superuser (full access)", value=False)
+                        force_change = st.checkbox("Force password change on first login",
+                                                 value=True)
 
-                notes = st.text_area("Notes", height=60)
+                    notes = st.text_area("Notes", height=60)
 
-                st.markdown("##### 🔑 Password")
-                pwd_mode = st.radio("Password mode",
-                                   ["Auto-generate temporary password",
-                                    "Set a specific password"],
-                                   horizontal=True, key="add_usr_pwd_mode")
+                    st.markdown("##### 🔑 Password")
+                    pwd_mode = st.radio("Password mode",
+                                       ["Auto-generate temporary password",
+                                        "Set a specific password"],
+                                       horizontal=True, key="add_usr_pwd_mode")
 
-                manual_pwd = None
-                if pwd_mode == "Set a specific password":
-                    manual_pwd = st.text_input("Password", type="password",
-                                              placeholder="Min 6 characters")
+                    manual_pwd = None
+                    if pwd_mode == "Set a specific password":
+                        manual_pwd = st.text_input("Password", type="password",
+                                                  placeholder="Min 6 characters")
 
-                submitted = st.form_submit_button("💾 Create User", type="primary",
-                                                 use_container_width=True)
+                    submitted = st.form_submit_button("💾 Create User", type="primary",
+                                                     use_container_width=True)
 
-                if submitted:
-                    if not username:
-                        st.error("❌ Username is required")
-                    elif pwd_mode == "Set a specific password" and (not manual_pwd or len(manual_pwd) < 6):
-                        st.error("❌ Password must be at least 6 characters")
-                    else:
-                        ok, msg, uid, temp_pwd = create_user(
-                            username=username,
-                            email=email,
-                            password=manual_pwd,
-                            first_name=first_name,
-                            last_name=last_name,
-                            phone=phone,
-                            role_id=role_opts[role_sel],
-                            is_superuser=is_superuser,
-                            must_change_password=force_change,
-                            notes=notes,
-                        )
-                        if ok:
-                            st.success(msg)
-                            if temp_pwd and pwd_mode != "Set a specific password":
-                                st.warning(f"📌 Temporary password: **`{temp_pwd}`**")
-                                st.info("Copy this now — it will NOT be shown again.")
-                            st.balloons()
-                            st.rerun()
+                    if submitted:
+                        if not username:
+                            st.error("❌ Username is required")
+                        elif role_sel not in role_opts:
+                            st.error("❌ Selected role is invalid. Refresh the page.")
+                        elif pwd_mode == "Set a specific password" and (not manual_pwd or len(manual_pwd) < 6):
+                            st.error("❌ Password must be at least 6 characters")
                         else:
-                            st.error(msg)
+                            ok, msg, uid, temp_pwd = create_user(
+                                username=username,
+                                email=email,
+                                password=manual_pwd,
+                                first_name=first_name,
+                                last_name=last_name,
+                                phone=phone,
+                                role_id=role_opts[role_sel],
+                                is_superuser=is_superuser,
+                                must_change_password=force_change,
+                                notes=notes,
+                            )
+                            if ok:
+                                st.success(msg)
+                                if temp_pwd and pwd_mode != "Set a specific password":
+                                    st.warning(f"📌 Temporary password: **`{temp_pwd}`**")
+                                    st.info("Copy this now — it will NOT be shown again.")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error(msg)
 
     # ============================================
     # TAB 3: EDIT USER
@@ -176,19 +192,24 @@ def users_page():
             st.warning("⚠️ Only Administrator can edit users.")
         else:
             users_df = get_users()
+            roles_df = get_roles(active_only=True)
+
             if users_df.empty:
                 st.info("No users yet.")
+            elif roles_df.empty:
+                st.error("⚠️ No roles defined. Add roles in the **🛡️ Roles** tab first.")
             else:
-                options = {f"{r['username']} — {r.get('role_name') or 'No role'}": r['id']
-                           for _, r in users_df.iterrows()}
+                role_opts = {r['name']: r['id'] for _, r in roles_df.iterrows()}
+
+                options = {
+                    f"{r['username']} — {r.get('role_name') or 'No role'}": r['id']
+                    for _, r in users_df.iterrows()
+                }
                 sel = st.selectbox("Select User", list(options.keys()), key="edit_usr_sel")
                 uid = options[sel]
 
                 u = get_user(uid)
                 if u is not None:
-                    roles_df = get_roles(active_only=True)
-                    role_opts = {r['name']: r['id'] for _, r in roles_df.iterrows()}
-
                     with st.form("edit_user_form"):
                         c1, c2 = st.columns(2)
                         with c1:
@@ -199,9 +220,11 @@ def users_page():
                         with c2:
                             last_name = st.text_input("Last Name", value=u['last_name'] or "")
                             current_role = u.get('role_name') or list(role_opts.keys())[0]
+                            default_idx = 0
+                            if current_role in role_opts:
+                                default_idx = list(role_opts.keys()).index(current_role)
                             role_sel = st.selectbox("Role", list(role_opts.keys()),
-                                                   index=list(role_opts.keys()).index(current_role)
-                                                   if current_role in role_opts else 0)
+                                                   index=default_idx)
                             is_superuser = st.checkbox("Superuser", value=bool(u['is_superuser']))
                             is_active = st.checkbox("Active", value=bool(u['is_active']))
 
@@ -247,6 +270,8 @@ def users_page():
                             st.success(msg)
                             st.warning(f"📌 Temporary password: **`{temp}`**")
                             st.info("Copy this now — it will NOT be shown again.")
+                        else:
+                            st.error(msg)
 
                     st.markdown("---")
                     st.markdown("#### 📊 Recent Activity")
@@ -272,7 +297,7 @@ def users_page():
         roles_df = get_roles(active_only=False)
 
         if roles_df.empty:
-            st.info("No roles yet.")
+            st.info("No roles yet — use the form below to create your first role.")
         else:
             st.dataframe(roles_df, use_container_width=True, hide_index=True)
 
