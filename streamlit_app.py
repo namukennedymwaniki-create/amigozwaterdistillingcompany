@@ -14,6 +14,7 @@ from pages_inventory import inventory_page
 from pages_quality import quality_page
 from pages_customers import customers_page
 from pages_sales import sales_page
+from pages_warehouse import warehouse_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -278,6 +279,7 @@ def sidebar_navigation():
             "Procurement": "🛒",
             "Production": "⚙️",
             "Quality Control": "🧪",
+            "Warehouse": "🏭",
             "Sales": "💰",
             "Finance": "💳",
             "Reports": "📈",
@@ -460,6 +462,8 @@ def main():
         inventory_page()
     elif selected_page == "Quality Control":
         quality_page()
+    elif selected_page == "Warehouse":
+        warehouse_page()
     elif selected_page == "Sales":
         sales_page()
     elif selected_page == "Settings":
