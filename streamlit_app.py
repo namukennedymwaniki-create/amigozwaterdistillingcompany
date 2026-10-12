@@ -566,7 +566,78 @@ def sidebar_navigation():
 # DASHBOARD
 # =========================================================
 def dashboard_page():
-    st.markdown("<h2 style='margin-bottom: 30px;'>📊 Dashboard</h2>", unsafe_allow_html=True)
+    # =========================================================
+    # LIGHT BLUE THEME STYLING
+    # =========================================================
+    st.markdown("""
+    <style>
+        /* Main app background - Light blue gradient */
+        .stApp {
+            background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 50%, #e0f7fa 100%) !important;
+        }
+        
+        /* Main content container */
+        .main > div {
+            background: transparent !important;
+        }
+        
+        .block-container {
+            background: transparent !important;
+            padding-top: 2rem !important;
+        }
+        
+        /* Metric cards - Light blue glassmorphism */
+        div[data-testid="metric-container"] {
+            background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%) !important;
+            border: 1px solid #bae6fd !important;
+            border-radius: 14px !important;
+            padding: 1.25rem !important;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.1) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        div[data-testid="metric-container"]:hover {
+            box-shadow: 0 8px 20px rgba(14, 165, 233, 0.2) !important;
+            transform: translateY(-3px) !important;
+            border-color: #7dd3fc !important;
+        }
+        
+        div[data-testid="metric-container"] label {
+            color: #0369a1 !important;
+            font-weight: 600 !important;
+        }
+        
+        div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+            color: #0c4a6e !important;
+            font-weight: 700 !important;
+        }
+        
+        /* Headers - Dark blue */
+        h1, h2, h3, h4, h5, h6 {
+            color: #0c4a6e !important;
+        }
+        
+        /* Warning/Info/Success boxes - Light blue theme */
+        .stAlert {
+            border-radius: 10px !important;
+            border-left: 4px solid #0ea5e9 !important;
+        }
+        
+        /* Plotly charts background */
+        .js-plotly-plot .plotly .main-svg {
+            background: transparent !important;
+        }
+        
+        /* Success message */
+        div[data-testid="stNotification"] {
+            background: linear-gradient(135deg, #ecfeff 0%, #cffafe 100%) !important;
+            border-radius: 12px !important;
+            border-left: 4px solid #06b6d4 !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<h2 style='margin-bottom: 30px; color: #0c4a6e;'>📊 Dashboard</h2>", unsafe_allow_html=True)
     
     # Show bypass warning
     st.warning("🔓 Password bypass is active - This is for testing only!")
@@ -584,6 +655,9 @@ def dashboard_page():
         finally:
             session.close()
     
+    # =========================================================
+    # KPI METRICS
+    # =========================================================
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("📦 Products", product_count or 45)
@@ -596,31 +670,119 @@ def dashboard_page():
     
     st.markdown("<br>", unsafe_allow_html=True)
     
+    # =========================================================
+    # CHARTS ROW
+    # =========================================================
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("<h4>📊 Production Trends</h4>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="
+            background: white;
+            padding: 20px;
+            border-radius: 14px;
+            border: 1px solid #bae6fd;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.1);
+            margin-bottom: 10px;
+        ">
+            <h4 style="color: #0c4a6e; margin: 0; border-left: 4px solid #0ea5e9; padding-left: 12px;">
+                📊 Production Trends
+            </h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
         days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         data = [1200, 1900, 1500, 2100, 1800, 1400, 1600]
         
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=days, y=data, mode='lines+markers', 
-                                 line=dict(color='#667eea', width=3)))
-        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), 
-                          showlegend=False, plot_bgcolor='rgba(0,0,0,0)')
+        fig.add_trace(go.Scatter(
+            x=days, 
+            y=data, 
+            mode='lines+markers',
+            line=dict(color='#0ea5e9', width=3),
+            marker=dict(size=10, color='#0284c7', line=dict(width=2, color='white')),
+            fill='tozeroy',
+            fillcolor='rgba(14, 165, 233, 0.1)'
+        ))
+        fig.update_layout(
+            height=300, 
+            margin=dict(l=0, r=0, t=20, b=0),
+            showlegend=False,
+            plot_bgcolor='rgba(255,255,255,0.5)',
+            paper_bgcolor='rgba(255,255,255,0.5)',
+            font=dict(color='#0c4a6e'),
+            xaxis=dict(gridcolor='rgba(14, 165, 233, 0.1)'),
+            yaxis=dict(gridcolor='rgba(14, 165, 233, 0.1)')
+        )
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("<h4>💰 Sales Overview</h4>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="
+            background: white;
+            padding: 20px;
+            border-radius: 14px;
+            border: 1px solid #bae6fd;
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.1);
+            margin-bottom: 10px;
+        ">
+            <h4 style="color: #0c4a6e; margin: 0; border-left: 4px solid #06b6d4; padding-left: 12px;">
+                💰 Sales Overview
+            </h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
         data = [5000, 7500, 6000, 9000, 8500, 5500, 7000]
         
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=days, y=data, marker_color='#f5576c'))
-        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), 
-                          showlegend=False, plot_bgcolor='rgba(0,0,0,0)')
+        fig.add_trace(go.Bar(
+            x=days, 
+            y=data,
+            marker=dict(
+                color=['#0ea5e9', '#0284c7', '#0369a1', '#075985', '#0c4a6e', '#38bdf8', '#7dd3fc'],
+                line=dict(width=1, color='white')
+            ),
+            text=data,
+            textposition='outside',
+            textfont=dict(color='#0c4a6e', size=11)
+        ))
+        fig.update_layout(
+            height=300, 
+            margin=dict(l=0, r=0, t=20, b=0),
+            showlegend=False,
+            plot_bgcolor='rgba(255,255,255,0.5)',
+            paper_bgcolor='rgba(255,255,255,0.5)',
+            font=dict(color='#0c4a6e'),
+            xaxis=dict(gridcolor='rgba(14, 165, 233, 0.1)'),
+            yaxis=dict(gridcolor='rgba(14, 165, 233, 0.1)')
+        )
         st.plotly_chart(fig, use_container_width=True)
     
-    st.success("✅ Welcome to Amigoz Water Distilling Company ERP System")
+    # =========================================================
+    # WELCOME MESSAGE
+    # =========================================================
+    st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
+        padding: 20px 24px;
+        border-radius: 14px;
+        border-left: 6px solid #0284c7;
+        margin-top: 20px;
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+    ">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 28px;">✅</span>
+            <div>
+                <h4 style="color: #0c4a6e; margin: 0; font-weight: 700;">
+                    Welcome to Amigoz Water Distilling Company ERP System
+                </h4>
+                <p style="color: #0369a1; margin: 4px 0 0; font-size: 14px;">
+                    Your all-in-one solution for managing products, suppliers, customers, and more.
+                </p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # =========================================================
 # PLACEHOLDER PAGES
