@@ -22,6 +22,7 @@ from pages_reports import reports_page
 from pages_containers import containers_page
 from pages_reports_hub import reports_hub_page
 from services_permissions import get_visible_menu
+from pages_payments import payments_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -293,7 +294,7 @@ def sidebar_navigation():
             "Reports": "📈",
             "Sales": "💰",
             "Containers": "🍶",
-            "Finance": "💳",
+            "Payments": "💳",
             "Reports": "📈",
             "Settings": "⚙️",
         }
@@ -478,6 +479,8 @@ def main():
                 run_procurement_migrations()
                 from database_migrations_containers import run_container_migrations
                 run_container_migrations()
+                from database_migrations_payments import run_payments_migrations
+                run_payments_migrations()
                 
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
@@ -511,6 +514,8 @@ def main():
         containers_page()
     elif selected_page == "Sales":
         sales_page()
+    elif selected_page == "Payments":
+        payments_page()
     elif selected_page == "Suppliers":
         suppliers_page()
     elif selected_page == "Procurement":
@@ -519,7 +524,7 @@ def main():
         reports_hub_page()
     elif selected_page == "Settings":
         settings_page()
-    elif selected_page in ["User Management", "Production", "Finance"]:
+    elif selected_page in ["User Management", "Production"]:
         placeholder_page(selected_page)
     else:
         dashboard_page()
