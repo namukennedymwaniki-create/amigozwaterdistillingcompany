@@ -23,6 +23,7 @@ from pages_containers import containers_page
 from pages_reports_hub import reports_hub_page
 from services_permissions import get_visible_menu
 from pages_payments import payments_page
+from pages_users import users_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -481,6 +482,8 @@ def main():
                 run_container_migrations()
                 from database_migrations_payments import run_payments_migrations
                 run_payments_migrations()
+                from database_migrations_users import run_users_migrations
+                run_users_migrations()
                 
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
@@ -524,7 +527,9 @@ def main():
         reports_hub_page()
     elif selected_page == "Settings":
         settings_page()
-    elif selected_page in ["User Management", "Production"]:
+    elif selected_page == "User Management":
+        users_page()
+    elif selected_page in ["Production"]:
         placeholder_page(selected_page)
     else:
         dashboard_page()
