@@ -448,3 +448,33 @@ def get_ledger(product_id=None, warehouse_id=None, from_date=None, to_date=None)
     query += " ORDER BY sm.movement_date DESC, sm.id DESC LIMIT 500"
     
     return read_sql(query, params if params else None)
+    # =========================================================
+# GET SELLABLE STOCK (Batch-Aware)
+# =========================================================
+def get_sellable_stock(product_id, warehouse_id=None):
+    """
+    Get stock that is available for sale.
+    - Non-batch-tracked: all stock
+    - Batch-tracked: only Released + non-expired batches
+    """
+    from services_quality import get_available_stock
+    return get_available_stock(product_id, warehouse_id)
+
+
+# =========================================================
+# CHECK SELLABLE (For Dispatch Validation)
+# =========================================================
+def check_sellable_stock(product_id, warehouse_id, quantity_requested):
+    """
+    Validate that enough sellable stock exists.
+    Returns (ok: bool, available: float, message: str)
+    """
+    available = get_sellable_stock(product_id, warehouse_id)
+    
+    if available >= quantity_requested:
+        return True, available, f"✅ Sufficient stock: {available}"
+    else:
+        return False, available, (
+            f"❌ Insufficient sellable stock. "
+            f"Available: {available}, Requested: {quantity_requested}"
+        )
