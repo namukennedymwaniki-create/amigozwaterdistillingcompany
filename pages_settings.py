@@ -1,16 +1,15 @@
 # pages_settings.py
-# Settings Module — Stage 01, Step 2
-# Includes: Warehouse/Stock Locations register
+# Settings Module — Warehouse & Category Register
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from sqlalchemy import text
-from database import get_db_connection, log_audit
+from database import get_db_connection, log_audit, read_sql
 
 
 def settings_page():
-    """Settings page - Warehouse register and system configuration"""
+    """Settings page - Warehouse register and categories"""
     
     st.markdown("""
     <style>
@@ -23,7 +22,7 @@ def settings_page():
     
     st.markdown("<h2 style='color: #0c4a6e;'>⚙️ Settings</h2>", unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["🏢 Warehouses / Stock Locations", "📁 Product Categories", "ℹ️ System Info"])
+    tab1, tab2, tab3 = st.tabs(["🏢 Warehouses", "📁 Product Categories", "ℹ️ System Info"])
     
     # ============================================
     # TAB 1: WAREHOUSES
@@ -32,26 +31,19 @@ def settings_page():
         st.markdown("#### 🏢 Warehouses / Stock Locations")
         st.caption("Define where stock is stored — Main Store, Production, Distribution Depot")
         
-        conn = get_db_connection()
-        if not conn:
-            return
+        df = read_sql("""
+            SELECT id, code, name, warehouse_type, location, manager_name, is_active
+            FROM warehouses
+            ORDER BY id
+        """)
         
-        try:
-            df = pd.read_sql(text("""
-                SELECT id, code, name, warehouse_type, location, manager_name, is_active
-                FROM warehouses
-                ORDER BY id
-            """), conn)
-            
-            if not df.empty:
-                display_df = df.copy()
-                display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅ Active" if x else "❌ Inactive")
-                display_df.columns = ['ID', 'Code', 'Name', 'Type', 'Location', 'Manager', 'Status']
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-            else:
-                st.info("No warehouses yet.")
-        finally:
-            conn.close()
+        if not df.empty:
+            display_df = df.copy()
+            display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅ Active" if x else "❌ Inactive")
+            display_df.columns = ['ID', 'Code', 'Name', 'Type', 'Location', 'Manager', 'Status']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No warehouses yet.")
         
         st.markdown("---")
         
@@ -124,26 +116,19 @@ def settings_page():
     with tab2:
         st.markdown("#### 📁 Product Categories")
         
-        conn = get_db_connection()
-        if not conn:
-            return
+        df = read_sql("""
+            SELECT id, name, description, is_active
+            FROM product_categories
+            ORDER BY name
+        """)
         
-        try:
-            df = pd.read_sql(text("""
-                SELECT id, name, description, is_active
-                FROM product_categories
-                ORDER BY name
-            """), conn)
-            
-            if not df.empty:
-                display_df = df.copy()
-                display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅" if x else "❌")
-                display_df.columns = ['ID', 'Name', 'Description', 'Active']
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-            else:
-                st.info("No categories yet.")
-        finally:
-            conn.close()
+        if not df.empty:
+            display_df = df.copy()
+            display_df['is_active'] = display_df['is_active'].apply(lambda x: "✅" if x else "❌")
+            display_df.columns = ['ID', 'Name', 'Description', 'Active']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No categories yet.")
         
         with st.expander("➕ Add Category", expanded=False):
             with st.form("add_category_form"):
