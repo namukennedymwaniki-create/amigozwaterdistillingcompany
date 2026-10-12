@@ -15,6 +15,7 @@ from pages_quality import quality_page
 from pages_customers import customers_page
 from pages_sales import sales_page
 from pages_warehouse import warehouse_page
+from pages_delivery import delivery_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -280,6 +281,7 @@ def sidebar_navigation():
             "Production": "⚙️",
             "Quality Control": "🧪",
             "Warehouse": "🏭",
+            "Deliveries": "📬",
             "Sales": "💰",
             "Finance": "💳",
             "Reports": "📈",
@@ -437,6 +439,8 @@ def main():
                 # Run stage migrations
                 from database_migrations import run_migrations
                 run_migrations()
+                from database_migrations_delivery import run_delivery_migrations
+                run_delivery_migrations()
                 
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
@@ -464,6 +468,8 @@ def main():
         quality_page()
     elif selected_page == "Warehouse":
         warehouse_page()
+    elif selected_page == "Deliveries":
+        delivery_page()
     elif selected_page == "Sales":
         sales_page()
     elif selected_page == "Settings":
