@@ -16,6 +16,9 @@ from pages_customers import customers_page
 from pages_sales import sales_page
 from pages_warehouse import warehouse_page
 from pages_delivery import delivery_page
+from pages_suppliers import suppliers_page
+from pages_procurement import procurement_page
+from pages_reports import reports_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -282,6 +285,9 @@ def sidebar_navigation():
             "Quality Control": "🧪",
             "Warehouse": "🏭",
             "Deliveries": "📬",
+            "Suppliers": "🏭",
+            "Procurement": "🛒",
+            "Reports": "📈",
             "Sales": "💰",
             "Finance": "💳",
             "Reports": "📈",
@@ -408,7 +414,21 @@ def dashboard_page():
                           showlegend=False, plot_bgcolor='rgba(255,255,255,0.5)',
                           paper_bgcolor='rgba(255,255,255,0.5)')
         st.plotly_chart(fig, use_container_width=True)
-
+   
+    # Reorder alerts widget
+    st.markdown("---")
+    st.markdown("#### ⚠️ Reorder Alerts")
+    from services_procurement import get_reorder_alerts
+    reorder_df = get_reorder_alerts()
+    if reorder_df.empty:
+        st.success("✅ All products above reorder level")
+    else:
+        st.warning(f"⚠️ {len(reorder_df)} product(s) below reorder level")
+        st.dataframe(
+            reorder_df[['product_code', 'product_name', 'current_stock',
+                        'reorder_level']].head(10),
+            use_container_width=True, hide_index=True,
+        )
 # =========================================================
 # IMPORT PAGE MODULES
 # =========================================================
@@ -441,6 +461,11 @@ def main():
                 run_migrations()
                 from database_migrations_delivery import run_delivery_migrations
                 run_delivery_migrations()
+                from database_migrations_delivery import run_delivery_migrations
+                run_delivery_migrations()
+                
+                from database_migrations_procurement import run_procurement_migrations
+                run_procurement_migrations()
                 
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
@@ -456,27 +481,21 @@ def main():
     # ============================================
     # ROUTER
     # ============================================
-    if selected_page == "Dashboard":
-        dashboard_page()
-    elif selected_page == "Products":
-        products_page()
-    elif selected_page == "Customers":
-        customers_page()
-    elif selected_page == "Inventory":
-        inventory_page()
-    elif selected_page == "Quality Control":
-        quality_page()
     elif selected_page == "Warehouse":
         warehouse_page()
     elif selected_page == "Deliveries":
         delivery_page()
     elif selected_page == "Sales":
         sales_page()
+    elif selected_page == "Suppliers":
+        suppliers_page()
+    elif selected_page == "Procurement":
+        procurement_page()
+    elif selected_page == "Reports":
+        reports_page()
     elif selected_page == "Settings":
         settings_page()
-    elif selected_page in ["User Management", "Suppliers",
-                            "Procurement", "Production",
-                            "Finance", "Reports"]:
+    elif selected_page in ["User Management", "Production", "Finance"]:
         placeholder_page(selected_page)
     else:
         dashboard_page()
