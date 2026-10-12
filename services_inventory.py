@@ -9,7 +9,7 @@
 import streamlit as st
 from datetime import datetime, date
 from sqlalchemy import text
-from database import get_db_connection, log_audit, get_is_cloud
+from database import get_db_connection, log_audit, get_is_cloud, read_sql
 
 
 # =========================================================
@@ -191,49 +191,37 @@ def get_stock_balance(product_id, warehouse_id=None, batch_id=None, conn=None):
 # =========================================================
 def get_warehouse_balances(warehouse_id=None):
     """Returns DataFrame of product balances for a warehouse (or all)"""
-    import pandas as pd
+    query = """
+        SELECT 
+            p.id as product_id,
+            p.product_code,
+            p.product_name,
+            p.unit,
+            w.id as warehouse_id,
+            w.code as warehouse_code,
+            w.name as warehouse_name,
+            COALESCE(SUM(sm.quantity_change), 0) as balance
+        FROM products p
+        CROSS JOIN warehouses w
+        LEFT JOIN stock_movements sm 
+            ON sm.product_id = p.id 
+            AND sm.warehouse_id = w.id
+            AND sm.is_posted = 1
+        WHERE p.is_active = 1
+    """
+    params = {}
     
-    conn = get_db_connection()
-    if not conn:
-        return pd.DataFrame()
+    if warehouse_id is not None:
+        query += " AND w.id = :wid"
+        params["wid"] = warehouse_id
     
-    try:
-        query = """
-            SELECT 
-                p.id as product_id,
-                p.product_code,
-                p.product_name,
-                p.unit,
-                w.id as warehouse_id,
-                w.code as warehouse_code,
-                w.name as warehouse_name,
-                COALESCE(SUM(sm.quantity_change), 0) as balance
-            FROM products p
-            CROSS JOIN warehouses w
-            LEFT JOIN stock_movements sm 
-                ON sm.product_id = p.id 
-                AND sm.warehouse_id = w.id
-                AND sm.is_posted = 1
-            WHERE p.is_active = 1
-        """
-        params = {}
-        
-        if warehouse_id is not None:
-            query += " AND w.id = :wid"
-            params["wid"] = warehouse_id
-        
-        query += """
-            GROUP BY p.id, p.product_code, p.product_name, p.unit,
-                     w.id, w.code, w.name
-            ORDER BY p.product_name, w.code
-        """
-        
-        return pd.read_sql(text(query), conn, params=params)
-    except Exception as e:
-        print(f"Balances error: {e}")
-        return pd.DataFrame()
-    finally:
-        conn.close()
+    query += """
+        GROUP BY p.id, p.product_code, p.product_name, p.unit,
+                 w.id, w.code, w.name
+        ORDER BY p.product_name, w.code
+    """
+    
+    return read_sql(query, params if params else None)
 
 
 # =========================================================
@@ -243,7 +231,6 @@ def post_opening_stock(product_id, quantity, unit_cost=0, batch_number=None,
                        production_date=None, expiry_date=None, reason=None):
     """
     Record opening stock at MAIN warehouse.
-    Optionally creates a batch if product is batch-tracked.
     """
     conn = get_db_connection()
     if not conn:
@@ -256,6 +243,7 @@ def post_opening_stock(product_id, quantity, unit_cost=0, batch_number=None,
         )).fetchone()
         
         if not main_wh:
+            conn.close()
             return False, "MAIN warehouse not found. Please create it in Settings."
         
         main_wh_id = main_wh[0]
@@ -309,21 +297,17 @@ def post_opening_stock(product_id, quantity, unit_cost=0, batch_number=None,
 
 
 # =========================================================
-# STOCK TRANSFER (MAIN → PROD / DIST)
+# STOCK TRANSFER
 # =========================================================
 def transfer_stock(product_id, from_wh_id, to_wh_id, quantity,
                    batch_id=None, reason=None, unit_cost=0):
-    """
-    Transfer stock between warehouses.
-    Posts TWO movements: TRANSFER_OUT (negative) and TRANSFER_IN (positive).
-    """
+    """Transfer stock between warehouses (2 movements)"""
     if quantity <= 0:
         return False, "Quantity must be positive"
     
     if from_wh_id == to_wh_id:
         return False, "Source and destination must be different"
     
-    # Check source balance
     source_balance = get_stock_balance(product_id, from_wh_id, batch_id)
     if source_balance < quantity:
         return False, (
@@ -333,7 +317,6 @@ def transfer_stock(product_id, from_wh_id, to_wh_id, quantity,
     
     ref = generate_reference("TRF")
     
-    # Post OUT from source
     ok1, msg1, _ = post_movement(
         product_id=product_id,
         warehouse_id=from_wh_id,
@@ -347,7 +330,6 @@ def transfer_stock(product_id, from_wh_id, to_wh_id, quantity,
     if not ok1:
         return False, f"Transfer OUT failed: {msg1}"
     
-    # Post IN to destination
     ok2, msg2, _ = post_movement(
         product_id=product_id,
         warehouse_id=to_wh_id,
@@ -369,10 +351,7 @@ def transfer_stock(product_id, from_wh_id, to_wh_id, quantity,
 # =========================================================
 def post_adjustment(product_id, warehouse_id, new_quantity,
                     batch_id=None, reason=None):
-    """
-    Adjust stock to a target quantity.
-    Calculates the difference and posts an adjustment movement.
-    """
+    """Adjust stock to a target quantity"""
     if not reason:
         return False, "Reason is required for adjustments"
     
@@ -433,51 +412,39 @@ def generate_reference(prefix):
 # =========================================================
 def get_ledger(product_id=None, warehouse_id=None, from_date=None, to_date=None):
     """Fetch ledger entries with optional filters"""
-    import pandas as pd
+    query = """
+        SELECT 
+            sm.id,
+            sm.movement_date,
+            sm.movement_type,
+            sm.reference_number,
+            p.product_code,
+            p.product_name,
+            w.code as warehouse,
+            sm.quantity_change,
+            sm.balance_after,
+            sm.reason,
+            sm.created_at
+        FROM stock_movements sm
+        JOIN products p ON sm.product_id = p.id
+        JOIN warehouses w ON sm.warehouse_id = w.id
+        WHERE sm.is_posted = 1
+    """
+    params = {}
     
-    conn = get_db_connection()
-    if not conn:
-        return pd.DataFrame()
+    if product_id:
+        query += " AND sm.product_id = :pid"
+        params["pid"] = product_id
+    if warehouse_id:
+        query += " AND sm.warehouse_id = :wid"
+        params["wid"] = warehouse_id
+    if from_date:
+        query += " AND sm.movement_date >= :fd"
+        params["fd"] = from_date
+    if to_date:
+        query += " AND sm.movement_date <= :td"
+        params["td"] = to_date
     
-    try:
-        query = """
-            SELECT 
-                sm.id,
-                sm.movement_date,
-                sm.movement_type,
-                sm.reference_number,
-                p.product_code,
-                p.product_name,
-                w.code as warehouse,
-                sm.quantity_change,
-                sm.balance_after,
-                sm.reason,
-                sm.created_at
-            FROM stock_movements sm
-            JOIN products p ON sm.product_id = p.id
-            JOIN warehouses w ON sm.warehouse_id = w.id
-            WHERE sm.is_posted = 1
-        """
-        params = {}
-        
-        if product_id:
-            query += " AND sm.product_id = :pid"
-            params["pid"] = product_id
-        if warehouse_id:
-            query += " AND sm.warehouse_id = :wid"
-            params["wid"] = warehouse_id
-        if from_date:
-            query += " AND sm.movement_date >= :fd"
-            params["fd"] = from_date
-        if to_date:
-            query += " AND sm.movement_date <= :td"
-            params["td"] = to_date
-        
-        query += " ORDER BY sm.movement_date DESC, sm.id DESC LIMIT 500"
-        
-        return pd.read_sql(text(query), conn, params=params)
-    except Exception as e:
-        print(f"Ledger error: {e}")
-        return pd.DataFrame()
-    finally:
-        conn.close()
+    query += " ORDER BY sm.movement_date DESC, sm.id DESC LIMIT 500"
+    
+    return read_sql(query, params if params else None)
