@@ -355,12 +355,114 @@ def login_page():
 # SIDEBAR NAVIGATION
 # =========================================================
 def sidebar_navigation():
+    # =========================================================
+    # PURPLE SIDEBAR STYLING
+    # =========================================================
+    st.markdown("""
+    <style>
+        /* Sidebar background - Purple gradient */
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #4c1d95 0%, #5b21b6 50%, #6d28d9 100%) !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+        
+        /* Sidebar content padding */
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+        }
+        
+        /* All text in sidebar - white */
+        section[data-testid="stSidebar"] .stMarkdown,
+        section[data-testid="stSidebar"] .stMarkdown p,
+        section[data-testid="stSidebar"] .stMarkdown h1,
+        section[data-testid="stSidebar"] .stMarkdown h2,
+        section[data-testid="stSidebar"] .stMarkdown h3,
+        section[data-testid="stSidebar"] .stMarkdown h4,
+        section[data-testid="stSidebar"] .stMarkdown h5,
+        section[data-testid="stSidebar"] .stMarkdown h6 {
+            color: white !important;
+        }
+        
+        /* Sidebar buttons - purple theme */
+        section[data-testid="stSidebar"] .stButton button {
+            background: rgba(255, 255, 255, 0.1) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 10px !important;
+            font-weight: 500 !important;
+            transition: all 0.3s ease !important;
+            text-align: left !important;
+            padding: 10px 15px !important;
+            margin-bottom: 4px !important;
+        }
+        
+        section[data-testid="stSidebar"] .stButton button:hover {
+            background: rgba(255, 255, 255, 0.2) !important;
+            border-color: rgba(255, 255, 255, 0.3) !important;
+            transform: translateX(4px) !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+        }
+        
+        /* Logout button - special styling */
+        section[data-testid="stSidebar"] .stButton button[kind="secondary"] {
+            background: linear-gradient(135deg, #ef4444, #dc2626) !important;
+            border: none !important;
+        }
+        
+        section[data-testid="stSidebar"] .stButton button[kind="secondary"]:hover {
+            background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4) !important;
+        }
+        
+        /* Sidebar dividers - subtle white */
+        section[data-testid="stSidebar"] hr {
+            border-color: rgba(255, 255, 255, 0.15) !important;
+            margin: 12px 0 !important;
+        }
+        
+        /* Sidebar scrollbar - purple themed */
+        section[data-testid="stSidebar"] ::-webkit-scrollbar {
+            width: 6px !important;
+        }
+        
+        section[data-testid="stSidebar"] ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05) !important;
+        }
+        
+        section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3) !important;
+            border-radius: 3px !important;
+        }
+        
+        section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5) !important;
+        }
+        
+        /* User profile card - glassmorphism effect */
+        .user-profile-card {
+            background: rgba(255, 255, 255, 0.1) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 12px !important;
+        }
+        
+        /* Header card styling */
+        .sidebar-header {
+            background: rgba(255, 255, 255, 0.08) !important;
+            backdrop-filter: blur(10px) !important;
+            border-radius: 12px !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     with st.sidebar:
         st.markdown("""
-        <div style="padding: 20px 0; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1);">
+        <div class="sidebar-header" style="padding: 20px 0; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.15);">
             <h3 style="color: white; margin: 0;">💧 Amigoz ERP</h3>
-            <p style="color: rgba(255,255,255,0.6); font-size: 12px; margin: 5px 0 0;">Version 1.0.0</p>
-            <p style="color: #ff6b6b; font-size: 10px; margin: 5px 0 0;">🔓 Bypass Mode</p>
+            <p style="color: rgba(255,255,255,0.7); font-size: 12px; margin: 5px 0 0;">Version 1.0.0</p>
+            <p style="color: #fbbf24; font-size: 10px; margin: 5px 0 0;">🔓 Bypass Mode</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -368,21 +470,33 @@ def sidebar_navigation():
         
         if st.session_state.authenticated:
             st.markdown(f"""
-            <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+            <div class="user-profile-card" style="padding: 15px; margin-bottom: 20px;">
                 <div style="display: flex; align-items: center; gap: 12px;">
-                    <div style="width: 42px; height: 42px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 18px;">
+                    <div style="width: 42px; height: 42px; background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 18px; box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);">
                         {st.session_state.full_name[0].upper() if st.session_state.full_name else 'U'}
                     </div>
                     <div style="flex: 1;">
                         <div style="color: white; font-weight: 600; font-size: 14px;">{st.session_state.full_name}</div>
-                        <div style="color: rgba(255,255,255,0.5); font-size: 12px;">{st.session_state.role or 'No Role'}</div>
+                        <div style="color: rgba(255,255,255,0.7); font-size: 12px;">{st.session_state.role or 'No Role'}</div>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
         
         # Navigation
-        st.markdown("### 📋 Navigation")
+        st.markdown("""
+        <div style="
+            color: white; 
+            font-size: 14px; 
+            font-weight: 600; 
+            margin-bottom: 12px;
+            padding-left: 5px;
+            border-left: 3px solid #fbbf24;
+            padding: 4px 0 4px 12px;
+        ">
+            📋 Navigation
+        </div>
+        """, unsafe_allow_html=True)
         
         pages = {
             "Dashboard": "🏠",
@@ -401,7 +515,14 @@ def sidebar_navigation():
         }
         
         for page_name, icon in pages.items():
-            if st.button(f"{icon} {page_name}", key=f"nav_{page_name}", use_container_width=True):
+            # Highlight current page
+            is_current = st.session_state.page == page_name
+            button_label = f"{icon} {page_name}"
+            
+            if is_current:
+                button_label = f"▶ {icon} {page_name}"
+            
+            if st.button(button_label, key=f"nav_{page_name}", use_container_width=True):
                 st.session_state.page = page_name
                 st.rerun()
         
@@ -422,9 +543,25 @@ def sidebar_navigation():
             for key in ['authenticated', 'user', 'user_id', 'role', 'full_name']:
                 st.session_state[key] = None if key != 'authenticated' else False
             st.rerun()
+        
+        # =========================================================
+        # FOOTER
+        # =========================================================
+        st.markdown("""
+        <div style="
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 10px;
+            color: rgba(255,255,255,0.5);
+        ">
+            Amigoz ERP System<br>
+            © 2026 Amigoz Water Distilling Co.
+        </div>
+        """, unsafe_allow_html=True)
     
     return st.session_state.page
-
 # =========================================================
 # DASHBOARD
 # =========================================================
