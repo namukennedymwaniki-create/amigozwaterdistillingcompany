@@ -24,6 +24,7 @@ from pages_reports_hub import reports_hub_page
 from services_permissions import get_visible_menu
 from pages_payments import payments_page
 from pages_users import users_page
+from sqlalchemy import text
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
