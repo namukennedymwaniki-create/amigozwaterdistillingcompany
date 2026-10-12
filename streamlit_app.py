@@ -19,6 +19,9 @@ from pages_delivery import delivery_page
 from pages_suppliers import suppliers_page
 from pages_procurement import procurement_page
 from pages_reports import reports_page
+from pages_containers import containers_page
+from pages_reports_hub import reports_hub_page
+from services_permissions import get_visible_menu
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -289,12 +292,19 @@ def sidebar_navigation():
             "Procurement": "🛒",
             "Reports": "📈",
             "Sales": "💰",
+            "Containers": "🍶",
             "Finance": "💳",
             "Reports": "📈",
             "Settings": "⚙️",
         }
         
+        # Role-based menu filtering
+        role = st.session_state.get('role') or 'Viewer'
+        visible = get_visible_menu(role, list(pages.keys()))
+        
         for page_name, icon in pages.items():
+            if page_name not in visible:
+                continue
             is_current = st.session_state.page == page_name
             label = f"▶ {icon} {page_name}" if is_current else f"{icon} {page_name}"
             if st.button(label, key=f"nav_{page_name}", use_container_width=True):
@@ -466,6 +476,8 @@ def main():
                 
                 from database_migrations_procurement import run_procurement_migrations
                 run_procurement_migrations()
+                from database_migrations_containers import run_container_migrations
+                run_container_migrations()
                 
                 st.session_state.db_initialized = True
                 st.toast("✅ Database ready!", icon="✅")
@@ -495,6 +507,8 @@ def main():
         warehouse_page()
     elif selected_page == "Deliveries":
         delivery_page()
+    elif selected_page == "Containers":
+        containers_page()
     elif selected_page == "Sales":
         sales_page()
     elif selected_page == "Suppliers":
@@ -502,7 +516,7 @@ def main():
     elif selected_page == "Procurement":
         procurement_page()
     elif selected_page == "Reports":
-        reports_page()
+        reports_hub_page()
     elif selected_page == "Settings":
         settings_page()
     elif selected_page in ["User Management", "Production", "Finance"]:
