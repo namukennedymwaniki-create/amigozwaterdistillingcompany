@@ -25,6 +25,7 @@ from services_permissions import get_visible_menu
 from pages_payments import payments_page
 from pages_users import users_page
 from sqlalchemy import text
+from pages_test_data import test_data_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -347,6 +348,7 @@ def sidebar_navigation():
             "Containers": "🍶",
             "Payments": "💳",
             "Reports": "📈",
+            "Test Data": "🧪",
             "Settings": "⚙️",
         }
         
@@ -625,6 +627,8 @@ def main():
         settings_page()
     elif selected_page == "User Management":
         users_page()
+    elif selected_page == "Test Data":
+        test_data_page()
     elif selected_page in ["Production"]:
         placeholder_page(selected_page)
     else:
