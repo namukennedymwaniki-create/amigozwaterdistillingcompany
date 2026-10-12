@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import os
 import hashlib
 from pages_inventory import inventory_page
+from pages_quality import quality_page
 
 # =========================================================
 # MUST BE FIRST STREAMLIT COMMAND
@@ -449,11 +450,13 @@ def main():
         products_page()
     elif selected_page == "Inventory":
         inventory_page()
+    elif selected_page == "Quality Control":
+        quality_page()
     elif selected_page == "Settings":
         settings_page()
     elif selected_page in ["User Management", "Suppliers", "Customers",
                             "Procurement", "Production",
-                            "Quality Control", "Sales", "Finance", "Reports"]:
+                            "Sales", "Finance", "Reports"]:
         placeholder_page(selected_page)
     else:
         dashboard_page()
