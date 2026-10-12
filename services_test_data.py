@@ -4,8 +4,8 @@
 # =========================================================
 # All test records are tagged:
 #   - users:        username starts with 'test_'
-#   - customers:    customer_code starts with 'TST-'
-#   - suppliers:    supplier_code starts with 'TST-'
+#   - customers:    customer_code starts with 'TST-CUST-'
+#   - suppliers:    supplier_code starts with 'TST-SUP-'
 #   - products:     product_code starts with 'TPRD-'
 #   - POs:          po_number starts with 'TPO-'
 #   - GRNs:         grn_number starts with 'TGRN-'
@@ -16,6 +16,8 @@
 #   - Returns:      return_number starts with 'TCRT-'
 #   - Payments:     payment_number starts with 'TPAY-'
 #   - Notes:        '[TEST]' marker in notes field
+#
+# IMPORTANT: `stock_movements` uses `reason` (not `notes`) for free text.
 # =========================================================
 
 import streamlit as st
@@ -64,8 +66,6 @@ PRODUCT_TEMPLATES = [
     ("TPRD-DISP",  "Water Dispenser (Top)", "Accessories", "Standard", "pcs", 2500, 3200, 15),
 ]
 
-PRODUCT_TPRD = "TPRD"  # prefix
-
 
 # =========================================================
 # HELPERS
@@ -112,7 +112,7 @@ def preview_plan(n_users=5, n_customers=10, n_suppliers=5, n_products=7,
 def generate_users(count=5):
     """Create test users. Returns list of created user IDs."""
     from services_users import create_user, get_roles
-    
+
     conn = get_db_connection()
     if not conn:
         return []
@@ -120,14 +120,14 @@ def generate_users(count=5):
         roles_df = get_roles(active_only=True)
         role_map = {r['name']: r['id'] for _, r in roles_df.iterrows()}
         role_names = [r for r in role_map.keys() if r != "Administrator"]
-        
+
         created = []
         for i in range(count):
             fn = random.choice(FIRST_NAMES)
             ln = random.choice(LAST_NAMES)
             uname = f"test_{fn.lower()}_{i+1}"
             role = random.choice(role_names) if role_names else "Sales Officer"
-            
+
             ok, msg, uid, _ = create_user(
                 username=uname,
                 email=_rand_email(f"{fn} {ln}"),
@@ -152,15 +152,12 @@ def generate_users(count=5):
 # =========================================================
 def generate_customers(count=10):
     """Create test customers with TST- prefix codes"""
-    from services_customers import create_customer
-    
     created = []
     for i in range(count):
         name = f"[TEST] {random.choice(CUSTOMER_NAMES)} {i+1}"
         ctype = random.choice(["Retail", "Wholesale", "Distributor",
                                 "Government", "Institution"])
-        
-        # Direct insert (create_customer uses CUST- generator)
+
         conn = get_db_connection()
         if not conn:
             continue
@@ -199,7 +196,7 @@ def generate_customers(count=10):
             print(f"Customer {i} error: {e}")
         finally:
             conn.close()
-    
+
     return created
 
 
@@ -255,12 +252,11 @@ def generate_products():
         return []
     created = []
     try:
-        # Fetch categories
         cats = conn.execute(text(
             "SELECT id, name FROM product_categories"
         )).fetchall()
         cat_map = {name: cid for cid, name in cats}
-        
+
         for code, name, cat, size, unit, cost, price, reorder in PRODUCT_TEMPLATES:
             existing = conn.execute(text(
                 "SELECT id FROM products WHERE product_code = :c"
@@ -268,9 +264,9 @@ def generate_products():
             if existing:
                 created.append(existing[0])
                 continue
-            
+
             batch_tracked = cat in ("Bottled Water", "Sachet Water")
-            
+
             result = conn.execute(text("""
                 INSERT INTO products (
                     product_code, product_name, category_id, size, unit,
@@ -317,11 +313,10 @@ def generate_opening_stock():
         products = conn.execute(text("""
             SELECT id FROM products WHERE product_code LIKE 'TPRD-%'
         """)).fetchall()
-        
+
         count = 0
         for (pid,) in products:
             qty = random.randint(500, 2000)
-            # use a TEST prefix (services_inventory generates OPEN- prefix, override by passing reason)
             ok, msg = post_opening_stock(
                 product_id=pid,
                 quantity=qty,
@@ -340,14 +335,11 @@ def generate_opening_stock():
 # =========================================================
 def generate_sales_orders(count=10):
     """Create, confirm, dispatch, and invoice test orders"""
-    from services_sales import (
-        create_sales_order, confirm_order, get_order
-    )
+    from services_sales import create_sales_order, confirm_order, get_order
     from services_dispatch import create_dispatch, confirm_dispatch
     from services_invoices import create_invoice_from_order
-    from services_quality import get_available_stock
     from services_inventory import get_stock_balance
-    
+
     conn = get_db_connection()
     if not conn:
         return {"orders": 0, "dispatched": 0, "invoiced": 0}
@@ -362,27 +354,24 @@ def generate_sales_orders(count=10):
         warehouses = conn.execute(text(
             "SELECT id, code FROM warehouses WHERE is_active = 1"
         )).fetchall()
-        
+
         if not (customers and products and warehouses):
             return {"orders": 0, "dispatched": 0, "invoiced": 0}
-        
-        # Prefer MAIN
+
         main_wh = next((w for w in warehouses if w[1] == 'MAIN'), warehouses[0])
         main_wh_id = main_wh[0]
-        
+
         stats = {"orders": 0, "confirmed": 0, "dispatched": 0, "invoiced": 0}
-        
+
         for i in range(count):
             cust_id = random.choice(customers)[0]
             order_date = _rand_date(60)
-            
-            # Pick 1-3 products
+
             n_items = random.randint(1, 3)
             picked = random.sample(products, min(n_items, len(products)))
-            
+
             items = []
             for pid, pcode, price, bt in picked:
-                # Ensure stock
                 stock = get_stock_balance(pid, main_wh_id)
                 if stock < 10:
                     continue
@@ -392,10 +381,10 @@ def generate_sales_orders(count=10):
                     "quantity": qty,
                     "unit_price": float(price or 0),
                 })
-            
+
             if not items:
                 continue
-            
+
             ok, msg, order_id = create_sales_order(
                 customer_id=cust_id,
                 order_date=order_date,
@@ -408,18 +397,14 @@ def generate_sales_orders(count=10):
             if not ok:
                 continue
             stats["orders"] += 1
-            
-            # Confirm
+
             ok, msg = confirm_order(order_id)
             if ok:
                 stats["confirmed"] += 1
             else:
                 continue
-            
-            # Dispatch (50% of orders)
+
             if random.random() < 0.5:
-                order = get_order(order_id)
-                # Create dispatch for the items
                 dispatch_items = []
                 for it in items:
                     dispatch_items.append({
@@ -438,12 +423,11 @@ def generate_sales_orders(count=10):
                     ok2, _ = confirm_dispatch(disp_id)
                     if ok2:
                         stats["dispatched"] += 1
-                        
-                        # Invoice
+
                         ok3, _, _ = create_invoice_from_order(order_id)
                         if ok3:
                             stats["invoiced"] += 1
-        
+
         return stats
     except Exception as e:
         print(f"Sales gen error: {e}")
@@ -461,7 +445,7 @@ def generate_purchase_orders(count=4):
         create_purchase_order, approve_purchase_order,
         create_grn, confirm_grn,
     )
-    
+
     conn = get_db_connection()
     if not conn:
         return {"pos": 0, "grns": 0}
@@ -475,21 +459,21 @@ def generate_purchase_orders(count=4):
         warehouses = conn.execute(text(
             "SELECT id, code FROM warehouses WHERE is_active = 1"
         )).fetchall()
-        
+
         if not (suppliers and products and warehouses):
             return {"pos": 0, "grns": 0}
-        
+
         main_wh = next((w for w in warehouses if w[1] == 'MAIN'), warehouses[0])
-        
+
         stats = {"pos": 0, "approved": 0, "grns": 0, "grns_confirmed": 0}
-        
+
         for i in range(count):
             sup_id = random.choice(suppliers)[0]
             order_date = _rand_date(45)
-            
+
             n_items = random.randint(1, 3)
             picked = random.sample(products, min(n_items, len(products)))
-            
+
             items = []
             for pid, cost in picked:
                 qty = random.randint(100, 500)
@@ -498,7 +482,7 @@ def generate_purchase_orders(count=4):
                     "quantity_ordered": qty,
                     "unit_cost": float(cost or 0),
                 })
-            
+
             ok, msg, po_id = create_purchase_order(
                 supplier_id=sup_id,
                 order_date=order_date,
@@ -509,14 +493,12 @@ def generate_purchase_orders(count=4):
             if not ok:
                 continue
             stats["pos"] += 1
-            
-            # Approve
+
             ok, msg = approve_purchase_order(po_id)
             if not ok:
                 continue
             stats["approved"] += 1
-            
-            # Create GRN for all items
+
             grn_items = []
             for pid, cost in picked:
                 qty = random.randint(50, 200)
@@ -526,7 +508,7 @@ def generate_purchase_orders(count=4):
                     "quantity_rejected": 0,
                     "unit_cost": float(cost or 0),
                 })
-            
+
             ok, msg, grn_id = create_grn(
                 po_id=po_id,
                 warehouse_id=main_wh[0],
@@ -539,7 +521,7 @@ def generate_purchase_orders(count=4):
                 ok2, _ = confirm_grn(grn_id)
                 if ok2:
                     stats["grns_confirmed"] += 1
-        
+
         return stats
     except Exception as e:
         print(f"PO gen error: {e}")
@@ -554,12 +536,11 @@ def generate_purchase_orders(count=4):
 def generate_payments(count=5):
     """Record customer payments against test invoices"""
     from services_payments import record_customer_payment
-    
+
     conn = get_db_connection()
     if not conn:
         return 0
     try:
-        # Find unpaid/partial invoices for test customers
         invoices = conn.execute(text("""
             SELECT i.id, i.customer_id, i.balance_due
             FROM invoices i
@@ -569,13 +550,12 @@ def generate_payments(count=5):
               AND i.balance_due > 0
             ORDER BY i.invoice_date ASC
         """)).fetchall()
-        
+
         created = 0
         for inv_id, cust_id, balance in invoices[:count]:
             balance = float(balance or 0)
             if balance <= 0:
                 continue
-            # Pay full or partial
             amount = balance if random.random() < 0.6 else round(balance * 0.5, 2)
             ok, msg, _ = record_customer_payment(
                 customer_id=cust_id,
@@ -601,7 +581,7 @@ def generate_containers(count=5):
     from services_containers import (
         issue_containers, return_containers, get_issue_items,
     )
-    
+
     conn = get_db_connection()
     if not conn:
         return {"issues": 0, "returns": 0}
@@ -612,24 +592,24 @@ def generate_containers(count=5):
         containers = conn.execute(text(
             "SELECT id, deposit_amount FROM containers WHERE is_active = 1"
         )).fetchall()
-        
+
         if not (customers and containers):
             return {"issues": 0, "returns": 0}
-        
+
         stats = {"issues": 0, "returns": 0}
-        
+
         for i in range(count):
             cust_id = random.choice(customers)[0]
             n_types = random.randint(1, 2)
             picked = random.sample(containers, min(n_types, len(containers)))
-            
+
             items = []
             for cid, _dep in picked:
                 items.append({
                     "container_id": cid,
                     "quantity": random.randint(5, 20),
                 })
-            
+
             ok, msg, issue_id = issue_containers(
                 customer_id=cust_id,
                 issue_date=date.today() - timedelta(days=random.randint(5, 30)),
@@ -639,8 +619,7 @@ def generate_containers(count=5):
             if not ok:
                 continue
             stats["issues"] += 1
-            
-            # Return 60% of issues
+
             if random.random() < 0.6:
                 issue_items = get_issue_items(issue_id)
                 if issue_items.empty:
@@ -670,7 +649,7 @@ def generate_containers(count=5):
                     )
                     if ok:
                         stats["returns"] += 1
-        
+
         return stats
     except Exception as e:
         print(f"Container gen error: {e}")
@@ -698,65 +677,65 @@ def generate_all(progress_callback=None, **kwargs):
         "payments": 0,
         "containers": {},
     }
-    
+
     def progress(msg):
         if progress_callback:
             progress_callback(msg)
-    
+
     try:
         progress("👤 Creating test users...")
         results["users"] = len(generate_users(kwargs.get("n_users", 5)))
     except Exception as e:
         print(f"users: {e}")
-    
+
     try:
         progress("👥 Creating test customers...")
         results["customers"] = len(generate_customers(kwargs.get("n_customers", 10)))
     except Exception as e:
         print(f"customers: {e}")
-    
+
     try:
         progress("🏭 Creating test suppliers...")
         results["suppliers"] = len(generate_suppliers(kwargs.get("n_suppliers", 5)))
     except Exception as e:
         print(f"suppliers: {e}")
-    
+
     try:
         progress("📦 Creating test products...")
         results["products"] = len(generate_products())
     except Exception as e:
         print(f"products: {e}")
-    
+
     try:
         progress("📥 Posting opening stock...")
         results["opening_stock"] = generate_opening_stock()
     except Exception as e:
         print(f"opening_stock: {e}")
-    
+
     try:
         progress("🛒 Creating purchase orders and receiving goods...")
         results["purchase_orders"] = generate_purchase_orders(kwargs.get("n_pos", 4))
     except Exception as e:
         print(f"purchase_orders: {e}")
-    
+
     try:
         progress("💰 Creating sales orders, dispatches, invoices...")
         results["sales_orders"] = generate_sales_orders(kwargs.get("n_sos", 10))
     except Exception as e:
         print(f"sales_orders: {e}")
-    
+
     try:
         progress("💳 Recording payments...")
         results["payments"] = generate_payments(kwargs.get("n_sos", 10))
     except Exception as e:
         print(f"payments: {e}")
-    
+
     try:
         progress("🍶 Creating container issues and returns...")
         results["containers"] = generate_containers(kwargs.get("n_container_issues", 5))
     except Exception as e:
         print(f"containers: {e}")
-    
+
     progress("✅ Test data generation complete")
     return results
 
@@ -775,73 +754,99 @@ def cleanup_test_data():
         return {"error": "No DB connection"}
     deleted = {}
     try:
-        # Order matters — children first
         deletes = [
             # Payments
-            ("payment_allocations", "payment_id IN (SELECT id FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%')"),
-            ("supplier_payment_allocations", "payment_id IN (SELECT id FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%')"),
-            ("payments", "payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("payment_allocations",
+             "payment_id IN (SELECT id FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%')"),
+            ("supplier_payment_allocations",
+             "payment_id IN (SELECT id FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%')"),
+            ("payments",
+             "payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%'"),
+
             # Containers
-            ("container_return_items", "return_id IN (SELECT id FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%')"),
-            ("container_returns", "return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'"),
-            ("container_issue_items", "issue_id IN (SELECT id FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%')"),
-            ("container_issues", "issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("container_return_items",
+             "return_id IN (SELECT id FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%')"),
+            ("container_returns",
+             "return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'"),
+            ("container_issue_items",
+             "issue_id IN (SELECT id FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%')"),
+            ("container_issues",
+             "issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'"),
+
             # Delivery
-            ("delivery_items", "delivery_id IN (SELECT id FROM deliveries WHERE delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%')"),
-            ("deliveries", "delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("delivery_items",
+             "delivery_id IN (SELECT id FROM deliveries WHERE delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%')"),
+            ("deliveries",
+             "delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%'"),
+
             # Dispatch
-            ("dispatch_items", "dispatch_id IN (SELECT id FROM dispatches WHERE dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%')"),
-            ("dispatches", "dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("dispatch_items",
+             "dispatch_id IN (SELECT id FROM dispatches WHERE dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%')"),
+            ("dispatches",
+             "dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%'"),
+
             # Invoice
-            ("invoice_items", "invoice_id IN (SELECT id FROM invoices WHERE notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'))"),
-            ("invoices", "notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
-            
+            ("invoice_items",
+             "invoice_id IN (SELECT id FROM invoices WHERE notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'))"),
+            ("invoices",
+             "notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
+
             # Sales orders
-            ("sales_order_items", "order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
-            ("stock_reservations", "reference_table = 'sales_orders' AND reference_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
-            ("sales_orders", "order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("sales_order_items",
+             "order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
+            ("stock_reservations",
+             "reference_table = 'sales_orders' AND reference_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
+            ("sales_orders",
+             "order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'"),
+
             # GRN
-            ("goods_received_note_items", "grn_id IN (SELECT id FROM goods_received_notes WHERE grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%')"),
-            ("goods_received_notes", "grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%'"),
-            
+            ("goods_received_note_items",
+             "grn_id IN (SELECT id FROM goods_received_notes WHERE grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%')"),
+            ("goods_received_notes",
+             "grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%'"),
+
             # PO
-            ("purchase_order_items", "po_id IN (SELECT id FROM purchase_orders WHERE po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%')"),
-            ("purchase_orders", "po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%'"),
-            
-            # Stock movements and batches for test products
-            ("stock_movements", "notes LIKE '%[TEST]%' OR reason LIKE '%[TEST]%' OR reference_number LIKE 'TEST-%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
-            ("product_batches", "notes LIKE '%[TEST]%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
-            
+            ("purchase_order_items",
+             "po_id IN (SELECT id FROM purchase_orders WHERE po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%')"),
+            ("purchase_orders",
+             "po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%'"),
+
+            # Stock movements — uses `reason` NOT `notes`
+            ("stock_movements",
+             "reason LIKE '%[TEST]%' OR reference_number LIKE 'TEST-%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
+
+            # Batches — has `notes`
+            ("product_batches",
+             "notes LIKE '%[TEST]%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
+
             # Products
             ("products", "product_code LIKE 'TPRD-%'"),
-            
+
             # Customers / suppliers
             ("customers", "customer_code LIKE 'TST-CUST-%'"),
             ("suppliers", "supplier_code LIKE 'TST-SUP-%'"),
-            
+
             # Users
-            ("user_login_history", "user_id IN (SELECT id FROM users WHERE username LIKE 'test_%')"),
+            ("user_login_history",
+             "user_id IN (SELECT id FROM users WHERE username LIKE 'test_%')"),
             ("users", "username LIKE 'test_%'"),
-            
+
             # Audit logs related to test data
-            ("audit_logs", "new_values LIKE '%[TEST]%' OR username LIKE 'test_%'"),
+            ("audit_logs",
+             "new_values LIKE '%[TEST]%' OR username LIKE 'test_%'"),
         ]
-        
+
         for table, condition in deletes:
             try:
-                result = conn.execute(text(f"DELETE FROM {table} WHERE {condition}"))
-                count = result.rowcount
-                deleted[table] = count
+                result = conn.execute(
+                    text(f"DELETE FROM {table} WHERE {condition}")
+                )
+                deleted[table] = result.rowcount
             except Exception as e:
                 deleted[table] = f"error: {e}"
                 conn.rollback()
                 continue
-        
+
         conn.commit()
         return deleted
     except Exception as e:
@@ -852,7 +857,10 @@ def cleanup_test_data():
 
 
 def count_test_data():
-    """Preview what would be deleted"""
+    """Preview what would be deleted.
+    
+    NOTE: `stock_movements` uses `reason` (not `notes`).
+    """
     queries = {
         "test users":       "SELECT COUNT(*) FROM users WHERE username LIKE 'test_%'",
         "test customers":   "SELECT COUNT(*) FROM customers WHERE customer_code LIKE 'TST-CUST-%'",
@@ -865,9 +873,16 @@ def count_test_data():
         "test deliveries":  "SELECT COUNT(*) FROM deliveries WHERE delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%'",
         "test invoices":    "SELECT COUNT(*) FROM invoices WHERE notes LIKE '%[TEST]%'",
         "test payments":    "SELECT COUNT(*) FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%'",
-        "test container issues": "SELECT COUNT(*) FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'",
-        "test container returns":"SELECT COUNT(*) FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'",
-        "test stock moves": "SELECT COUNT(*) FROM stock_movements WHERE notes LIKE '%[TEST]%' OR reference_number LIKE 'TEST-%'",
+        "test container issues":
+            "SELECT COUNT(*) FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'",
+        "test container returns":
+            "SELECT COUNT(*) FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'",
+        # FIXED: stock_movements uses `reason`, not `notes`
+        "test stock moves":
+            "SELECT COUNT(*) FROM stock_movements "
+            "WHERE reason LIKE '%[TEST]%' "
+            "   OR reference_number LIKE 'TEST-%' "
+            "   OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')",
     }
     conn = get_db_connection()
     if not conn:
