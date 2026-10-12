@@ -72,26 +72,29 @@ def read_sql(query, params=None):
     """
     Helper: Run a SELECT and return a DataFrame.
     Works with SQLAlchemy engine + psycopg (v3).
-    
-    Usage:
-        df = read_sql("SELECT * FROM products WHERE id = :id", {"id": 1})
+    Accepts either a plain string or a SQLAlchemy text() object.
+    Named parameters (`:id`) are supported.
     """
+    from sqlalchemy import text as sql_text
+
     engine = _get_engine()
     if engine is None:
         return pd.DataFrame()
-    
+
+    # Wrap in text() if it's a plain string so `:name` params work
+    stmt = sql_text(query) if isinstance(query, str) else query
+
     try:
         if params:
-            return pd.read_sql(query, engine, params=params)
-        return pd.read_sql(query, engine)
+            return pd.read_sql(stmt, engine, params=params)
+        return pd.read_sql(stmt, engine)
     except Exception as e:
         print(f"read_sql error: {e}")
-        # Fallback: try with connection
         try:
             with engine.connect() as conn:
                 if params:
-                    return pd.read_sql(query, conn, params=params)
-                return pd.read_sql(query, conn)
+                    return pd.read_sql(stmt, conn, params=params)
+                return pd.read_sql(stmt, conn)
         except Exception as e2:
             print(f"read_sql fallback error: {e2}")
             return pd.DataFrame()
