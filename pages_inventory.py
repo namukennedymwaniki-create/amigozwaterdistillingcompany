@@ -5,7 +5,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 from sqlalchemy import text
-from database import get_db_connection
+from database import get_db_connection, read_sql
 from services_inventory import (
     get_warehouse_balances, post_opening_stock, transfer_stock,
     post_adjustment, get_ledger, get_stock_balance,
@@ -43,13 +43,7 @@ def inventory_page():
         st.markdown("#### 📊 Current Stock Balance")
         st.caption("Calculated live from the stock ledger")
         
-        conn = get_db_connection()
-        if not conn:
-            return
-        try:
-            wh_df = pd.read_sql(text("SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code"), conn)
-        finally:
-            conn.close()
+        wh_df = read_sql("SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code")
         
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -68,13 +62,11 @@ def inventory_page():
         if balances_df.empty:
             st.info("No products yet. Add products in Products page.")
         else:
-            # Filter out zero balances for cleaner view
             balances_df = balances_df[balances_df['balance'] != 0]
             
             if balances_df.empty:
                 st.info("No stock recorded yet. Use '📥 Opening Stock' tab to record initial stock.")
             else:
-                # Group by product (sum across warehouses) OR show detailed
                 show_mode = st.radio(
                     "View Mode",
                     ["By Product (Total)", "By Product & Warehouse"],
@@ -110,23 +102,16 @@ def inventory_page():
     # ============================================
     with tab2:
         st.markdown("#### 📥 Record Opening Stock")
-        st.info("Opening stock is recorded at the **MAIN** warehouse. Use Transfers to move to other locations.")
+        st.info("Opening stock is recorded at the **MAIN** warehouse.")
         
-        conn = get_db_connection()
-        if not conn:
-            return
+        products_df = read_sql("""
+            SELECT id, product_code, product_name, unit, is_batch_tracked, cost_price
+            FROM products WHERE is_active = 1 ORDER BY product_name
+        """)
         
-        try:
-            products_df = pd.read_sql(text("""
-                SELECT id, product_code, product_name, unit, is_batch_tracked, cost_price
-                FROM products WHERE is_active = 1 ORDER BY product_name
-            """), conn)
-            conn.close()
-            
-            if products_df.empty:
-                st.warning("No products yet. Add products first.")
-                return
-            
+        if products_df.empty:
+            st.warning("No products yet. Add products first.")
+        else:
             options = {f"{row['product_code']} — {row['product_name']}": row['id']
                        for _, row in products_df.iterrows()}
             
@@ -184,8 +169,6 @@ def inventory_page():
                             st.balloons()
                         else:
                             st.error(msg)
-        except Exception as e:
-            st.error(f"Error: {e}")
     
     # ============================================
     # TAB 3: TRANSFER STOCK
@@ -194,71 +177,56 @@ def inventory_page():
         st.markdown("#### 🔄 Transfer Stock Between Warehouses")
         st.caption("Move stock: MAIN → PROD → DIST")
         
-        conn = get_db_connection()
-        if not conn:
-            return
-        
-        try:
-            products_df = pd.read_sql(text("""
-                SELECT id, product_code, product_name, unit
-                FROM products WHERE is_active = 1 ORDER BY product_name
-            """), conn)
-            warehouses_df = pd.read_sql(text("""
-                SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code
-            """), conn)
-        finally:
-            conn.close()
+        products_df = read_sql("""
+            SELECT id, product_code, product_name, unit
+            FROM products WHERE is_active = 1 ORDER BY product_name
+        """)
+        warehouses_df = read_sql("""
+            SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code
+        """)
         
         if products_df.empty or warehouses_df.empty:
             st.warning("Need at least one product and one warehouse.")
-            return
-        
-        prod_options = {f"{row['product_code']} — {row['product_name']}": row['id']
-                        for _, row in products_df.iterrows()}
-        wh_options = {f"{row['code']} — {row['name']}": row['id']
-                      for _, row in warehouses_df.iterrows()}
-        
-        with st.form("transfer_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                product_sel = st.selectbox("Product *", list(prod_options.keys()))
-                from_wh = st.selectbox("From Warehouse *", list(wh_options.keys()))
-            with col2:
-                to_wh = st.selectbox("To Warehouse *", list(wh_options.keys()),
-                                     index=min(1, len(wh_options) - 1))
-                quantity = st.number_input("Quantity *", min_value=0.0,
-                                          value=0.0, step=1.0, format="%.2f")
+        else:
+            prod_options = {f"{row['product_code']} — {row['product_name']}": row['id']
+                            for _, row in products_df.iterrows()}
+            wh_options = {f"{row['code']} — {row['name']}": row['id']
+                          for _, row in warehouses_df.iterrows()}
             
-            reason = st.text_input("Reason", placeholder="e.g., Distribution to depot")
-            
-            # Show current balance at source
-            if product_sel and from_wh:
-                pid = prod_options[product_sel]
-                fid = wh_options[from_wh]
-                balance = get_stock_balance(pid, fid)
-                st.info(f"📦 Available at source: **{balance} units**")
-            
-            submitted = st.form_submit_button("🔄 Post Transfer",
-                                              type="primary", use_container_width=True)
-            
-            if submitted:
-                if quantity <= 0:
-                    st.error("❌ Quantity must be > 0")
-                elif wh_options[from_wh] == wh_options[to_wh]:
-                    st.error("❌ Source and destination must differ")
-                else:
-                    ok, msg = transfer_stock(
-                        product_id=prod_options[product_sel],
-                        from_wh_id=wh_options[from_wh],
-                        to_wh_id=wh_options[to_wh],
-                        quantity=quantity,
-                        reason=reason,
-                    )
-                    if ok:
-                        st.success(msg)
-                        st.balloons()
+            with st.form("transfer_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    product_sel = st.selectbox("Product *", list(prod_options.keys()))
+                    from_wh = st.selectbox("From Warehouse *", list(wh_options.keys()))
+                with col2:
+                    to_wh = st.selectbox("To Warehouse *", list(wh_options.keys()),
+                                         index=min(1, len(wh_options) - 1))
+                    quantity = st.number_input("Quantity *", min_value=0.0,
+                                              value=0.0, step=1.0, format="%.2f")
+                
+                reason = st.text_input("Reason", placeholder="e.g., Distribution to depot")
+                
+                submitted = st.form_submit_button("🔄 Post Transfer",
+                                                  type="primary", use_container_width=True)
+                
+                if submitted:
+                    if quantity <= 0:
+                        st.error("❌ Quantity must be > 0")
+                    elif wh_options[from_wh] == wh_options[to_wh]:
+                        st.error("❌ Source and destination must differ")
                     else:
-                        st.error(msg)
+                        ok, msg = transfer_stock(
+                            product_id=prod_options[product_sel],
+                            from_wh_id=wh_options[from_wh],
+                            to_wh_id=wh_options[to_wh],
+                            quantity=quantity,
+                            reason=reason,
+                        )
+                        if ok:
+                            st.success(msg)
+                            st.balloons()
+                        else:
+                            st.error(msg)
     
     # ============================================
     # TAB 4: ADJUSTMENTS
@@ -267,61 +235,53 @@ def inventory_page():
         st.markdown("#### ⚖️ Stock Adjustments")
         st.warning("⚠️ Adjustments require a reason and are audited.")
         
-        conn = get_db_connection()
-        if not conn:
-            return
-        
-        try:
-            products_df = pd.read_sql(text("""
-                SELECT id, product_code, product_name, unit
-                FROM products WHERE is_active = 1 ORDER BY product_name
-            """), conn)
-            warehouses_df = pd.read_sql(text("""
-                SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code
-            """), conn)
-        finally:
-            conn.close()
+        products_df = read_sql("""
+            SELECT id, product_code, product_name, unit
+            FROM products WHERE is_active = 1 ORDER BY product_name
+        """)
+        warehouses_df = read_sql("""
+            SELECT id, code, name FROM warehouses WHERE is_active = 1 ORDER BY code
+        """)
         
         if products_df.empty or warehouses_df.empty:
             st.warning("Need at least one product and one warehouse.")
-            return
-        
-        prod_options = {f"{row['product_code']} — {row['product_name']}": row['id']
-                        for _, row in products_df.iterrows()}
-        wh_options = {f"{row['code']} — {row['name']}": row['id']
-                      for _, row in warehouses_df.iterrows()}
-        
-        with st.form("adjustment_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                product_sel = st.selectbox("Product *", list(prod_options.keys()), key="adj_prod")
-                wh_sel = st.selectbox("Warehouse *", list(wh_options.keys()), key="adj_wh")
-            with col2:
-                pid = prod_options[product_sel]
-                wid = wh_options[wh_sel]
-                current = get_stock_balance(pid, wid)
-                st.metric("Current Balance", f"{current} units")
-                new_quantity = st.number_input("New Quantity *", min_value=0.0,
-                                              value=float(current), step=1.0, format="%.2f")
+        else:
+            prod_options = {f"{row['product_code']} — {row['product_name']}": row['id']
+                            for _, row in products_df.iterrows()}
+            wh_options = {f"{row['code']} — {row['name']}": row['id']
+                          for _, row in warehouses_df.iterrows()}
             
-            reason = st.text_area("Reason for Adjustment *", height=80,
-                                  placeholder="e.g., Physical count variance, damaged goods, etc.")
-            
-            submitted = st.form_submit_button("⚖️ Post Adjustment",
-                                              type="primary", use_container_width=True)
-            
-            if submitted:
-                if not reason:
-                    st.error("❌ Reason is required")
-                else:
-                    ok, msg = post_adjustment(
-                        product_id=pid, warehouse_id=wid,
-                        new_quantity=new_quantity, reason=reason,
-                    )
-                    if ok:
-                        st.success(msg)
+            with st.form("adjustment_form"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    product_sel = st.selectbox("Product *", list(prod_options.keys()), key="adj_prod")
+                    wh_sel = st.selectbox("Warehouse *", list(wh_options.keys()), key="adj_wh")
+                with col2:
+                    pid = prod_options[product_sel]
+                    wid = wh_options[wh_sel]
+                    current = get_stock_balance(pid, wid)
+                    st.metric("Current Balance", f"{current} units")
+                    new_quantity = st.number_input("New Quantity *", min_value=0.0,
+                                                  value=float(current), step=1.0, format="%.2f")
+                
+                reason = st.text_area("Reason for Adjustment *", height=80,
+                                      placeholder="e.g., Physical count variance, damaged goods, etc.")
+                
+                submitted = st.form_submit_button("⚖️ Post Adjustment",
+                                                  type="primary", use_container_width=True)
+                
+                if submitted:
+                    if not reason:
+                        st.error("❌ Reason is required")
                     else:
-                        st.error(msg)
+                        ok, msg = post_adjustment(
+                            product_id=pid, warehouse_id=wid,
+                            new_quantity=new_quantity, reason=reason,
+                        )
+                        if ok:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
     
     # ============================================
     # TAB 5: LEDGER
@@ -330,19 +290,8 @@ def inventory_page():
         st.markdown("#### 📋 Stock Movement Ledger")
         st.caption("Every stock change is recorded here. This is your audit trail.")
         
-        conn = get_db_connection()
-        if not conn:
-            return
-        
-        try:
-            products_df = pd.read_sql(text("""
-                SELECT id, product_code, product_name FROM products ORDER BY product_name
-            """), conn)
-            warehouses_df = pd.read_sql(text("""
-                SELECT id, code, name FROM warehouses ORDER BY code
-            """), conn)
-        finally:
-            conn.close()
+        products_df = read_sql("SELECT id, product_code, product_name FROM products ORDER BY product_name")
+        warehouses_df = read_sql("SELECT id, code, name FROM warehouses ORDER BY code")
         
         col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
         with col1:
