@@ -127,7 +127,7 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 # =========================================================
-# LOGIN PAGE (BYPASS MODE)
+# LOGIN PAGE (SECURE)
 # =========================================================
 def login_page():
     st.markdown("""
@@ -135,78 +135,127 @@ def login_page():
         <div style="text-align: center; margin-bottom: 30px;">
             <h2 style="color: #2d3436; font-weight: 700;">💧 Amigoz Water Distilling</h2>
             <p style="color: #888;">Enterprise Resource Planning System</p>
-            <p style="color: #ff6b6b; font-size: 12px;">⚠️ Password bypass is ACTIVE</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        username = st.text_input("Username", placeholder="Enter username", key="login_username")
+        username = st.text_input(
+            "Username",
+            placeholder="Enter username",
+            key="login_username",
+        )
+        password = st.text_input(
+            "Password",
+            type="password",
+            placeholder="Enter password",
+            key="login_password",
+        )
         
-        # Bypass - any password works
-        if st.button("🔐 Sign In", key="login_button", use_container_width=True, type="primary"):
-            if username:
-                session = get_db_connection()
-                if session:
+        if st.button("🔐 Sign In", key="login_button",
+                     use_container_width=True, type="primary"):
+            if not username or not password:
+                st.warning("⚠️ Please enter both username and password")
+                return
+            
+            from services_users import verify_password, touch_login
+            from datetime import datetime
+            
+            session = get_db_connection()
+            if not session:
+                st.error("❌ Database connection failed. Please try again.")
+                return
+            
+            try:
+                result = session.execute(
+                    text("""SELECT u.id, u.username, u.password_hash,
+                                   u.first_name, u.last_name, u.is_superuser,
+                                   u.is_active, u.must_change_password,
+                                   r.name as role_name
+                            FROM users u
+                            LEFT JOIN roles r ON u.role_id = r.id
+                            WHERE LOWER(u.username) = LOWER(:u)
+                         """),
+                    {"u": username.strip()}
+                ).fetchone()
+                
+                # ------------------------------------------------
+                # USER NOT FOUND
+                # ------------------------------------------------
+                if not result:
+                    st.error("❌ Invalid username or password")
                     try:
-                        result = session.execute(
-                            text("""SELECT u.id, u.username, u.first_name, u.last_name, u.is_superuser,
-                                           r.name as role_name
-                                    FROM users u
-                                    LEFT JOIN roles r ON u.role_id = r.id
-                                    WHERE LOWER(u.username) = LOWER(:u) AND u.is_active = 1
-                                 """),
-                            {"u": username}
-                        ).fetchone()
-                        
-                        if result:
-                            st.session_state.authenticated = True
-                            st.session_state.user = result[1]
-                            st.session_state.user_id = result[0]
-                            st.session_state.role = result[5] or ("Administrator" if result[4] else "User")
-                            st.session_state.full_name = f"{result[2] or ''} {result[3] or ''}".strip() or result[1]
-                            st.rerun()
-                        else:
-                            # User not found - create temp session (bypass)
-                            st.session_state.authenticated = True
-                            st.session_state.user = username
-                            st.session_state.user_id = 1
-                            st.session_state.role = "Administrator"
-                            st.session_state.full_name = username
-                            st.rerun()
-                    except Exception as e:
-                        # Fallback bypass
-                        st.session_state.authenticated = True
-                        st.session_state.user = username
-                        st.session_state.user_id = 1
-                        st.session_state.role = "Administrator"
-                        st.session_state.full_name = username
-                        st.rerun()
-                    finally:
-                        session.close()
-                else:
-                    # No DB - direct bypass
-                    st.session_state.authenticated = True
-                    st.session_state.user = username
-                    st.session_state.user_id = 1
-                    st.session_state.role = "Administrator"
-                    st.session_state.full_name = username
-                    st.rerun()
-            else:
-                st.warning("⚠️ Please enter a username")
-        
-        if st.button("🚪 Quick Bypass (No Login)", key="bypass_button", use_container_width=True):
-            st.session_state.authenticated = True
-            st.session_state.user = "admin"
-            st.session_state.user_id = 1
-            st.session_state.role = "Administrator"
-            st.session_state.full_name = "System Administrator"
-            st.rerun()
+                        touch_login(user_id=0, success=False,
+                                    reason=f"Unknown user: {username}")
+                    except Exception:
+                        pass
+                    return
+                
+                (user_id, uname, pwd_hash,
+                 first_name, last_name, is_superuser,
+                 is_active, must_change_pwd, role_name) = result
+                
+                # ------------------------------------------------
+                # INACTIVE USER
+                # ------------------------------------------------
+                if not is_active:
+                    st.error("❌ This account has been deactivated. Contact your administrator.")
+                    touch_login(user_id=user_id, success=False,
+                                reason="Inactive account")
+                    return
+                
+                # ------------------------------------------------
+                # PASSWORD CHECK
+                # ------------------------------------------------
+                if not pwd_hash:
+                    st.error("❌ This account has no password set. Contact your administrator.")
+                    touch_login(user_id=user_id, success=False,
+                                reason="No password hash")
+                    return
+                
+                if not verify_password(password, pwd_hash):
+                    st.error("❌ Invalid username or password")
+                    touch_login(user_id=user_id, success=False,
+                                reason="Wrong password")
+                    return
+                
+                # ------------------------------------------------
+                # SUCCESS
+                # ------------------------------------------------
+                st.session_state.authenticated = True
+                st.session_state.user = uname
+                st.session_state.user_id = user_id
+                st.session_state.role = role_name or ("Administrator" if is_superuser else "User")
+                st.session_state.full_name = f"{first_name or ''} {last_name or ''}".strip() or uname
+                st.session_state.force_pwd_change = bool(must_change_pwd)
+                
+                # Log the successful login
+                touch_login(user_id=user_id, success=True)
+                
+                # Audit
+                try:
+                    from database import log_audit
+                    log_audit("LOGIN_SUCCESS", "users", user_id)
+                except Exception:
+                    pass
+                
+                st.rerun()
+            
+            except Exception as e:
+                st.error(f"❌ Login error: {e}")
+                try:
+                    from database import log_audit
+                    log_audit("LOGIN_ERROR", "users", None,
+                              new_values={"error": str(e), "username": username})
+                except Exception:
+                    pass
+            finally:
+                session.close()
         
         st.markdown("""
         <p style="text-align: center; color: #888; font-size: 12px; margin-top: 20px;">
-            🔓 Password check disabled for testing
+            🔒 Secured login · Contact your administrator for access
         </p>
         """, unsafe_allow_html=True)
 
@@ -495,7 +544,53 @@ def main():
         return
     
     selected_page = sidebar_navigation()
-    
+
+    # ----------------------------------------------------------
+    # FORCE PASSWORD CHANGE ON FIRST LOGIN / AFTER ADMIN RESET
+    # ----------------------------------------------------------
+    if st.session_state.get('force_pwd_change'):
+        st.markdown("### 🔒 Password Change Required")
+        st.info("Your account requires a new password before you can continue.")
+        
+        from services_users import change_own_password
+        
+        with st.form("force_pwd_change_form"):
+            new1 = st.text_input("New Password", type="password", key="fpwd_new1")
+            new2 = st.text_input("Confirm New Password", type="password", key="fpwd_new2")
+            submitted = st.form_submit_button("🔐 Change Password", type="primary",
+                                              use_container_width=True)
+            
+            if submitted:
+                if not new1 or not new2:
+                    st.error("Both fields are required")
+                elif new1 != new2:
+                    st.error("Passwords do not match")
+                elif len(new1) < 6:
+                    st.error("Password must be at least 6 characters")
+                else:
+                    # We use change_own_password with old == new to skip the check
+                    # (or better: use reset_password internally)
+                    from services_users import reset_password
+                    ok, msg, _ = reset_password(
+                        st.session_state.user_id,
+                        new_password=new1,
+                        must_change=False,
+                    )
+                    if ok:
+                        st.session_state.force_pwd_change = False
+                        st.success("✅ Password changed. Welcome!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        
+        # Logout option
+        if st.button("🚪 Logout", key="force_pwd_logout"):
+            for key in ['authenticated', 'user', 'user_id', 'role',
+                        'full_name', 'force_pwd_change']:
+                st.session_state[key] = False if key == 'authenticated' else None
+            st.rerun()
+        
+        return  # Stop here — don't render the app until password is changed
     # ============================================
     # ROUTER
     # ============================================
