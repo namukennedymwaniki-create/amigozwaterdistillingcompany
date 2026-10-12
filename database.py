@@ -8,6 +8,7 @@
 import streamlit as st
 import os
 import json
+import pandas as pd
 from datetime import datetime
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
@@ -67,6 +68,35 @@ def get_db_connection():
         return None
 
 
+def read_sql(query, params=None):
+    """
+    Helper: Run a SELECT and return a DataFrame.
+    Works with SQLAlchemy engine + psycopg (v3).
+    
+    Usage:
+        df = read_sql("SELECT * FROM products WHERE id = :id", {"id": 1})
+    """
+    engine = _get_engine()
+    if engine is None:
+        return pd.DataFrame()
+    
+    try:
+        if params:
+            return pd.read_sql(query, engine, params=params)
+        return pd.read_sql(query, engine)
+    except Exception as e:
+        print(f"read_sql error: {e}")
+        # Fallback: try with connection
+        try:
+            with engine.connect() as conn:
+                if params:
+                    return pd.read_sql(query, conn, params=params)
+                return pd.read_sql(query, conn)
+        except Exception as e2:
+            print(f"read_sql fallback error: {e2}")
+            return pd.DataFrame()
+
+
 def get_is_cloud():
     """Returns True if using PostgreSQL (cloud)"""
     try:
@@ -97,7 +127,6 @@ def init_all_tables():
             # ============================================
             if is_cloud:
                 statements = [
-                    # 1. ROLES
                     """CREATE TABLE IF NOT EXISTS roles (
                         id SERIAL PRIMARY KEY,
                         name VARCHAR(50) UNIQUE NOT NULL,
@@ -106,8 +135,6 @@ def init_all_tables():
                         is_active BOOLEAN DEFAULT TRUE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 2. USERS
                     """CREATE TABLE IF NOT EXISTS users (
                         id SERIAL PRIMARY KEY,
                         username VARCHAR(50) UNIQUE NOT NULL,
@@ -123,8 +150,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 3. WAREHOUSES (Stock Locations)
                     """CREATE TABLE IF NOT EXISTS warehouses (
                         id SERIAL PRIMARY KEY,
                         code VARCHAR(20) UNIQUE NOT NULL,
@@ -139,8 +164,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 4. PRODUCT CATEGORIES
                     """CREATE TABLE IF NOT EXISTS product_categories (
                         id SERIAL PRIMARY KEY,
                         name VARCHAR(100) UNIQUE NOT NULL,
@@ -148,8 +171,6 @@ def init_all_tables():
                         is_active BOOLEAN DEFAULT TRUE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 5. PRODUCTS
                     """CREATE TABLE IF NOT EXISTS products (
                         id SERIAL PRIMARY KEY,
                         product_code VARCHAR(50) UNIQUE NOT NULL,
@@ -169,8 +190,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 6. SUPPLIERS
                     """CREATE TABLE IF NOT EXISTS suppliers (
                         id SERIAL PRIMARY KEY,
                         supplier_code VARCHAR(50) UNIQUE NOT NULL,
@@ -187,8 +206,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 7. CUSTOMERS
                     """CREATE TABLE IF NOT EXISTS customers (
                         id SERIAL PRIMARY KEY,
                         customer_code VARCHAR(50) UNIQUE NOT NULL,
@@ -207,8 +224,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 8. PRODUCT BATCHES
                     """CREATE TABLE IF NOT EXISTS product_batches (
                         id SERIAL PRIMARY KEY,
                         batch_number VARCHAR(50) UNIQUE NOT NULL,
@@ -221,8 +236,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 9. STOCK MOVEMENTS (LEDGER)
                     """CREATE TABLE IF NOT EXISTS stock_movements (
                         id SERIAL PRIMARY KEY,
                         movement_date DATE NOT NULL,
@@ -242,8 +255,6 @@ def init_all_tables():
                         is_posted BOOLEAN DEFAULT TRUE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 10. PURCHASE ORDERS
                     """CREATE TABLE IF NOT EXISTS purchase_orders (
                         id SERIAL PRIMARY KEY,
                         po_number VARCHAR(50) UNIQUE NOT NULL,
@@ -258,8 +269,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 11. GOODS RECEIVED NOTES
                     """CREATE TABLE IF NOT EXISTS goods_received_notes (
                         id SERIAL PRIMARY KEY,
                         grn_number VARCHAR(50) UNIQUE NOT NULL,
@@ -273,8 +282,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 12. SALES ORDERS
                     """CREATE TABLE IF NOT EXISTS sales_orders (
                         id SERIAL PRIMARY KEY,
                         order_number VARCHAR(50) UNIQUE NOT NULL,
@@ -291,8 +298,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 13. SALES ORDER ITEMS
                     """CREATE TABLE IF NOT EXISTS sales_order_items (
                         id SERIAL PRIMARY KEY,
                         order_id INTEGER REFERENCES sales_orders(id) ON DELETE CASCADE,
@@ -303,8 +308,6 @@ def init_all_tables():
                         line_total NUMERIC(12,2) NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 14. DISPATCHES
                     """CREATE TABLE IF NOT EXISTS dispatches (
                         id SERIAL PRIMARY KEY,
                         dispatch_number VARCHAR(50) UNIQUE NOT NULL,
@@ -319,8 +322,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 15. DISPATCH ITEMS
                     """CREATE TABLE IF NOT EXISTS dispatch_items (
                         id SERIAL PRIMARY KEY,
                         dispatch_id INTEGER REFERENCES dispatches(id) ON DELETE CASCADE,
@@ -329,8 +330,6 @@ def init_all_tables():
                         quantity_dispatched NUMERIC(12,2) NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 16. DELIVERIES
                     """CREATE TABLE IF NOT EXISTS deliveries (
                         id SERIAL PRIMARY KEY,
                         delivery_number VARCHAR(50) UNIQUE NOT NULL,
@@ -344,8 +343,6 @@ def init_all_tables():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 17. CONTAINERS
                     """CREATE TABLE IF NOT EXISTS containers (
                         id SERIAL PRIMARY KEY,
                         container_code VARCHAR(50) UNIQUE NOT NULL,
@@ -357,8 +354,6 @@ def init_all_tables():
                         is_active BOOLEAN DEFAULT TRUE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 18. CONTAINER TRANSACTIONS
                     """CREATE TABLE IF NOT EXISTS container_transactions (
                         id SERIAL PRIMARY KEY,
                         transaction_date DATE NOT NULL,
@@ -372,8 +367,6 @@ def init_all_tables():
                         created_by INTEGER REFERENCES users(id),
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 19. PAYMENTS
                     """CREATE TABLE IF NOT EXISTS payments (
                         id SERIAL PRIMARY KEY,
                         payment_number VARCHAR(50) UNIQUE NOT NULL,
@@ -390,8 +383,6 @@ def init_all_tables():
                         created_by INTEGER REFERENCES users(id),
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""",
-                    
-                    # 20. AUDIT LOGS
                     """CREATE TABLE IF NOT EXISTS audit_logs (
                         id SERIAL PRIMARY KEY,
                         user_id INTEGER,
@@ -407,7 +398,7 @@ def init_all_tables():
                 ]
             
             # ============================================
-            # SQLITE SCHEMA (local development)
+            # SQLITE SCHEMA
             # ============================================
             else:
                 statements = [
@@ -419,7 +410,6 @@ def init_all_tables():
                         is_active INTEGER DEFAULT 1,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         username TEXT UNIQUE NOT NULL,
@@ -435,7 +425,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS warehouses (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         code TEXT UNIQUE NOT NULL,
@@ -450,7 +439,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS product_categories (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT UNIQUE NOT NULL,
@@ -458,7 +446,6 @@ def init_all_tables():
                         is_active INTEGER DEFAULT 1,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS products (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         product_code TEXT UNIQUE NOT NULL,
@@ -478,7 +465,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS suppliers (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         supplier_code TEXT UNIQUE NOT NULL,
@@ -495,7 +481,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS customers (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         customer_code TEXT UNIQUE NOT NULL,
@@ -514,7 +499,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS product_batches (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         batch_number TEXT UNIQUE NOT NULL,
@@ -527,7 +511,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS stock_movements (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         movement_date TEXT NOT NULL,
@@ -547,7 +530,6 @@ def init_all_tables():
                         is_posted INTEGER DEFAULT 1,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS purchase_orders (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         po_number TEXT UNIQUE NOT NULL,
@@ -562,7 +544,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS goods_received_notes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         grn_number TEXT UNIQUE NOT NULL,
@@ -576,7 +557,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS sales_orders (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         order_number TEXT UNIQUE NOT NULL,
@@ -593,7 +573,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS sales_order_items (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         order_id INTEGER,
@@ -604,7 +583,6 @@ def init_all_tables():
                         line_total REAL NOT NULL,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS dispatches (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         dispatch_number TEXT UNIQUE NOT NULL,
@@ -619,7 +597,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS dispatch_items (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         dispatch_id INTEGER,
@@ -628,7 +605,6 @@ def init_all_tables():
                         quantity_dispatched REAL NOT NULL,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS deliveries (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         delivery_number TEXT UNIQUE NOT NULL,
@@ -642,7 +618,6 @@ def init_all_tables():
                         created_at TEXT,
                         updated_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS containers (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         container_code TEXT UNIQUE NOT NULL,
@@ -654,7 +629,6 @@ def init_all_tables():
                         is_active INTEGER DEFAULT 1,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS container_transactions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         transaction_date TEXT NOT NULL,
@@ -668,7 +642,6 @@ def init_all_tables():
                         created_by INTEGER,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS payments (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         payment_number TEXT UNIQUE NOT NULL,
@@ -685,7 +658,6 @@ def init_all_tables():
                         created_by INTEGER,
                         created_at TEXT
                     )""",
-                    
                     """CREATE TABLE IF NOT EXISTS audit_logs (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         user_id INTEGER,
@@ -747,12 +719,10 @@ def seed_default_data():
         return False
     
     is_cloud = get_is_cloud()
-    now = "NOW()" if is_cloud else "datetime('now')"
+    now = "CURRENT_TIMESTAMP"
     
     try:
-        # ===========================================
         # SEED ROLES
-        # ===========================================
         count = conn.execute(text("SELECT COUNT(*) FROM roles")).scalar()
         if count == 0:
             roles = [
@@ -772,9 +742,7 @@ def seed_default_data():
                     VALUES (:name, :desc, 1, {now})
                 """), {"name": name, "desc": desc})
         
-        # ===========================================
-        # SEED WAREHOUSES (Stock Locations)
-        # ===========================================
+        # SEED WAREHOUSES
         count = conn.execute(text("SELECT COUNT(*) FROM warehouses")).scalar()
         if count == 0:
             warehouses = [
@@ -788,9 +756,7 @@ def seed_default_data():
                     VALUES (:code, :name, :wtype, :loc, :addr, 1, {now})
                 """), {"code": code, "name": name, "wtype": wtype, "loc": loc, "addr": addr})
         
-        # ===========================================
         # SEED PRODUCT CATEGORIES
-        # ===========================================
         count = conn.execute(text("SELECT COUNT(*) FROM product_categories")).scalar()
         if count == 0:
             categories = [
@@ -806,9 +772,7 @@ def seed_default_data():
                     VALUES (:name, :desc, 1, {now})
                 """), {"name": name, "desc": desc})
         
-        # ===========================================
         # SEED CONTAINERS
-        # ===========================================
         count = conn.execute(text("SELECT COUNT(*) FROM containers")).scalar()
         if count == 0:
             containers = [
@@ -850,16 +814,13 @@ def log_audit(action, table_name=None, record_id=None, old_values=None, new_valu
         user_id = st.session_state.get('user_id')
         username = st.session_state.get('user') or 'system'
         
-        is_cloud = get_is_cloud()
-        now = "NOW()" if is_cloud else "datetime('now')"
-        
         old_json = json.dumps(old_values, default=str) if old_values else None
         new_json = json.dumps(new_values, default=str) if new_values else None
         
-        conn.execute(text(f"""
+        conn.execute(text("""
             INSERT INTO audit_logs 
             (user_id, username, action, table_name, record_id, old_values, new_values, timestamp)
-            VALUES (:uid, :uname, :action, :tname, :rid, :old, :new, {now})
+            VALUES (:uid, :uname, :action, :tname, :rid, :old, :new, CURRENT_TIMESTAMP)
         """), {
             "uid": user_id,
             "uname": username,
@@ -919,7 +880,7 @@ def get_next_code(table, column, prefix, pad=4):
 # =========================================================
 
 def initialize_database():
-    """Run full initialization: create tables + seed defaults. Returns True on success."""
+    """Run full initialization: create tables + seed defaults."""
     if not init_all_tables():
         return False
     seed_default_data()
