@@ -1,26 +1,10 @@
 # =========================================================
 # services_test_data.py
-# Test Data Generator
+# Test Data Generator — Full Coverage
 # =========================================================
-# All test records are tagged:
-#   - users:        username starts with 'test_'
-#   - customers:    customer_code starts with 'TST-CUST-'
-#   - suppliers:    supplier_code starts with 'TST-SUP-'
-#   - products:     product_code starts with 'TPRD-'
-#   - POs:          po_number starts with 'TPO-'
-#   - GRNs:         grn_number starts with 'TGRN-'
-#   - SOs:          order_number starts with 'TSO-'
-#   - Dispatches:   dispatch_number starts with 'TDSP-'
-#   - Deliveries:   delivery_number starts with 'TDLV-'
-#   - Issues:       issue_number starts with 'TCIS-'
-#   - Returns:      return_number starts with 'TCRT-'
-#   - Payments:     payment_number starts with 'TPAY-'
-#   - Notes:        '[TEST]' marker in notes field
-#
-# IMPORTANT:
-#   - `stock_movements` uses `reason` (not `notes`) for free text.
-#   - All BOOLEAN columns take Python True/False via bind params.
-#   - All `except` blocks RAISE so errors surface in the UI.
+# Every table gets populated. All booleans use Python True/False.
+# All stock changes go through the ledger (post_movement).
+# Every record is tagged [TEST] for safe cleanup.
 # =========================================================
 
 import streamlit as st
@@ -60,13 +44,37 @@ SUPPLIER_NAMES = [
 ]
 
 PRODUCT_TEMPLATES = [
-    ("TPRD-500ML", "500ml Bottled Water", "Bottled Water", "500ml", "pcs", 30, 50, 200),
-    ("TPRD-1L",    "1 Litre Bottled Water", "Bottled Water", "1L",    "pcs", 50, 80, 150),
-    ("TPRD-5L",    "5 Litre Bottled Water", "Bottled Water", "5L",    "pcs", 150, 220, 100),
-    ("TPRD-10L",   "10 Litre Bottled Water", "Bottled Water", "10L",  "pcs", 200, 280, 80),
-    ("TPRD-20L",   "20 Litre Bottled Water", "Bottled Water", "20L",  "pcs", 300, 400, 60),
-    ("TPRD-SACH",  "Sachet Water (Pack)",   "Sachet Water", "500ml", "pack", 100, 150, 300),
-    ("TPRD-DISP",  "Water Dispenser (Top)", "Accessories", "Standard", "pcs", 2500, 3200, 15),
+    ("TPRD-500ML", "500ml Bottled Water", "Bottled Water", "500ml", "pcs", 30, 50, 200, True),
+    ("TPRD-1L",    "1 Litre Bottled Water", "Bottled Water", "1L",    "pcs", 50, 80, 150, True),
+    ("TPRD-5L",    "5 Litre Bottled Water", "Bottled Water", "5L",    "pcs", 150, 220, 100, True),
+    ("TPRD-10L",   "10 Litre Bottled Water", "Bottled Water", "10L",  "pcs", 200, 280, 80, True),
+    ("TPRD-20L",   "20 Litre Bottled Water", "Bottled Water", "20L",  "pcs", 300, 400, 60, True),
+    ("TPRD-SACH",  "Sachet Water (Pack)",   "Sachet Water", "500ml", "pack", 100, 150, 300, True),
+    ("TPRD-DISP",  "Water Dispenser (Top)", "Accessories", "Standard", "pcs", 2500, 3200, 15, False),
+    ("TPRD-PUMP",  "Manual Water Pump",     "Accessories", "Standard", "pcs", 800, 1200, 10, False),
+    ("TPRD-COOL",  "Water Cooler",          "Accessories", "Standard", "pcs", 5000, 7000, 5, False),
+]
+
+VEHICLE_TEMPLATES = [
+    ("KDA 123X", "3-ton truck", 3000),
+    ("KDB 456Y", "5-ton truck", 5000),
+    ("KDC 789Z", "1-ton van", 1000),
+    ("KDD 012W", "Pickup", 800),
+]
+
+DAMAGE_REASONS = [
+    "Broken during handling",
+    "Damaged in transit",
+    "Expired stock",
+    "Manufacturing defect",
+    "Customer return damaged",
+]
+
+ADJUSTMENT_REASONS = [
+    "Physical count variance",
+    "Record correction",
+    "Inventory audit adjustment",
+    "System reconciliation",
 ]
 
 
@@ -89,22 +97,28 @@ def _rand_email(name):
 # =========================================================
 # PREVIEW / DRY RUN
 # =========================================================
-def preview_plan(n_users=5, n_customers=10, n_suppliers=5, n_products=7,
-                 n_pos=4, n_grns=4, n_sos=10, n_dispatches=8,
-                 n_deliveries=8, n_container_issues=5):
+def preview_plan(n_users=5, n_customers=10, n_suppliers=5, n_products=9,
+                 n_pos=6, n_grns=6, n_sos=15, n_dispatches=12,
+                 n_deliveries=10, n_container_issues=8, n_payments=10,
+                 n_adjustments=4, n_damages=4):
     return {
         "users": n_users,
         "customers": n_customers,
         "suppliers": n_suppliers,
         "products": min(n_products, len(PRODUCT_TEMPLATES)),
+        "vehicles": len(VEHICLE_TEMPLATES),
+        "drivers": 3,
         "purchase_orders": n_pos,
         "goods_received_notes": n_grns,
         "sales_orders": n_sos,
         "dispatches": n_dispatches,
         "deliveries": n_deliveries,
         "container_issues": n_container_issues,
-        "container_returns": max(1, n_container_issues // 2),
-        "payments": n_sos,
+        "container_returns": max(2, n_container_issues // 2),
+        "customer_payments": n_payments,
+        "supplier_payments": 3,
+        "stock_adjustments": n_adjustments,
+        "damage_records": n_damages,
     }
 
 
@@ -112,7 +126,6 @@ def preview_plan(n_users=5, n_customers=10, n_suppliers=5, n_products=7,
 # GENERATE: USERS
 # =========================================================
 def generate_users(count=5):
-    """Create test users. Returns list of created user IDs."""
     from services_users import create_user, get_roles
 
     conn = get_db_connection()
@@ -150,16 +163,44 @@ def generate_users(count=5):
 
 
 # =========================================================
+# GENERATE: VEHICLES + DRIVERS
+# =========================================================
+def generate_vehicles_and_drivers():
+    from services_vehicles import create_vehicle, create_driver
+
+    created_vehicles = []
+    created_drivers = []
+
+    for plate, desc, cap in VEHICLE_TEMPLATES:
+        ok, msg, vid = create_vehicle(plate, desc, cap,
+                                       notes="[TEST] Auto-generated vehicle")
+        if ok and vid:
+            created_vehicles.append(vid)
+
+    for i in range(3):
+        fn = random.choice(FIRST_NAMES)
+        ln = random.choice(LAST_NAMES)
+        ok, msg, did = create_driver(
+            name=f"{fn} {ln}",
+            phone=_rand_phone(),
+            license_number=f"DL{random.randint(100000, 999999)}",
+            notes="[TEST] Auto-generated driver",
+        )
+        if ok and did:
+            created_drivers.append(did)
+
+    return {"vehicles": created_vehicles, "drivers": created_drivers}
+
+
+# =========================================================
 # GENERATE: CUSTOMERS
 # =========================================================
 def generate_customers(count=10):
-    """Create test customers with TST- prefix codes"""
     created = []
     for i in range(count):
         name = f"[TEST] {random.choice(CUSTOMER_NAMES)} {i+1}"
         ctype = random.choice(["Retail", "Wholesale", "Distributor",
                                 "Government", "Institution"])
-
         conn = get_db_connection()
         if not conn:
             continue
@@ -199,7 +240,6 @@ def generate_customers(count=10):
             raise Exception(f"Customer {i} insert failed: {type(e).__name__}: {e}")
         finally:
             conn.close()
-
     return created
 
 
@@ -261,15 +301,13 @@ def generate_products():
         )).fetchall()
         cat_map = {name: cid for cid, name in cats}
 
-        for code, name, cat, size, unit, cost, price, reorder in PRODUCT_TEMPLATES:
+        for code, name, cat, size, unit, cost, price, reorder, batch_tracked in PRODUCT_TEMPLATES:
             existing = conn.execute(text(
                 "SELECT id FROM products WHERE product_code = :c"
             ), {"c": code}).fetchone()
             if existing:
                 created.append(existing[0])
                 continue
-
-            batch_tracked = cat in ("Bottled Water", "Sachet Water")
 
             result = conn.execute(text("""
                 INSERT INTO products (
@@ -290,7 +328,7 @@ def generate_products():
                 "size": size, "unit": unit,
                 "pack": 1, "cost": cost, "price": price,
                 "reorder": reorder, "reorder_qty": reorder * 3,
-                "bt": batch_tracked,
+                "bt": bool(batch_tracked),
                 "active": True,
                 "desc": "[TEST] Auto-generated test product",
             })
@@ -309,23 +347,32 @@ def generate_products():
 # GENERATE: OPENING STOCK
 # =========================================================
 def generate_opening_stock():
-    """Give each test product 500-2000 units at MAIN warehouse"""
     from services_inventory import post_opening_stock
+    from services_quality import generate_batch_number
+
     conn = get_db_connection()
     if not conn:
         return 0
     try:
         products = conn.execute(text("""
-            SELECT id FROM products WHERE product_code LIKE 'TPRD-%'
+            SELECT id, product_code, is_batch_tracked
+            FROM products WHERE product_code LIKE 'TPRD-%'
         """)).fetchall()
 
         count = 0
-        for (pid,) in products:
+        for pid, pcode, is_batch in products:
             qty = random.randint(500, 2000)
+            batch_number = None
+            if is_batch:
+                batch_number = generate_batch_number(pcode)
+
             ok, msg = post_opening_stock(
                 product_id=pid,
                 quantity=qty,
                 unit_cost=0,
+                batch_number=batch_number,
+                production_date=date.today() - timedelta(days=random.randint(1, 30)),
+                expiry_date=date.today() + timedelta(days=random.randint(180, 730)),
                 reason="[TEST] Opening stock for test data",
             )
             if ok:
@@ -336,107 +383,85 @@ def generate_opening_stock():
 
 
 # =========================================================
-# GENERATE: CUSTOMER SALES ORDERS + INVOICES
+# GENERATE: STOCK ADJUSTMENTS
 # =========================================================
-def generate_sales_orders(count=10):
-    """Create, confirm, dispatch, and invoice test orders"""
-    from services_sales import create_sales_order, confirm_order, get_order
-    from services_dispatch import create_dispatch, confirm_dispatch
-    from services_invoices import create_invoice_from_order
+def generate_adjustments(count=4):
+    from services_inventory import post_adjustment, get_stock_balance
+
+    conn = get_db_connection()
+    if not conn:
+        return 0
+    try:
+        products = conn.execute(text("""
+            SELECT id FROM products WHERE product_code LIKE 'TPRD-%'
+        """)).fetchall()
+        warehouses = conn.execute(text(
+            "SELECT id FROM warehouses WHERE is_active = TRUE"
+        )).fetchall()
+        if not (products and warehouses):
+            return 0
+
+        created = 0
+        for _ in range(count):
+            pid = random.choice(products)[0]
+            wid = random.choice(warehouses)[0]
+            current = get_stock_balance(pid, wid)
+            if current <= 0:
+                continue
+            # Adjust by ±5-15%
+            variance = random.choice([-1, 1]) * int(current * random.uniform(0.05, 0.15))
+            new_qty = max(0, current + variance)
+            ok, msg = post_adjustment(
+                product_id=pid,
+                warehouse_id=wid,
+                new_quantity=new_qty,
+                reason=f"[TEST] {random.choice(ADJUSTMENT_REASONS)}",
+            )
+            if ok:
+                created += 1
+        return created
+    finally:
+        conn.close()
+
+
+# =========================================================
+# GENERATE: DAMAGE RECORDS
+# =========================================================
+def generate_damage_records(count=4):
+    from services_procurement import post_damaged_goods
     from services_inventory import get_stock_balance
 
     conn = get_db_connection()
     if not conn:
-        return {"orders": 0, "dispatched": 0, "invoiced": 0}
+        return 0
     try:
-        customers = conn.execute(text("""
-            SELECT id FROM customers WHERE customer_code LIKE 'TST-CUST-%'
-        """)).fetchall()
         products = conn.execute(text("""
-            SELECT id, product_code, selling_price, is_batch_tracked
-            FROM products WHERE product_code LIKE 'TPRD-%'
+            SELECT id FROM products WHERE product_code LIKE 'TPRD-%'
         """)).fetchall()
         warehouses = conn.execute(text(
-            "SELECT id, code FROM warehouses WHERE is_active = TRUE"
+            "SELECT id FROM warehouses WHERE is_active = TRUE"
         )).fetchall()
+        if not (products and warehouses):
+            return 0
 
-        if not (customers and products and warehouses):
-            return {"orders": 0, "dispatched": 0, "invoiced": 0}
-
-        main_wh = next((w for w in warehouses if w[1] == 'MAIN'), warehouses[0])
-        main_wh_id = main_wh[0]
-
-        stats = {"orders": 0, "confirmed": 0, "dispatched": 0, "invoiced": 0}
-
+        created = 0
         for i in range(count):
-            cust_id = random.choice(customers)[0]
-            order_date = _rand_date(60)
-
-            n_items = random.randint(1, 3)
-            picked = random.sample(products, min(n_items, len(products)))
-
-            items = []
-            for pid, pcode, price, bt in picked:
-                stock = get_stock_balance(pid, main_wh_id)
-                if stock < 10:
-                    continue
-                qty = random.randint(5, min(50, int(stock)))
-                items.append({
-                    "product_id": pid,
-                    "quantity": qty,
-                    "unit_price": float(price or 0),
-                })
-
-            if not items:
+            pid = random.choice(products)[0]
+            wid = random.choice(warehouses)[0]
+            stock = get_stock_balance(pid, wid)
+            if stock < 10:
                 continue
-
-            ok, msg, order_id = create_sales_order(
-                customer_id=cust_id,
-                order_date=order_date,
-                delivery_date=order_date + timedelta(days=random.randint(1, 5)),
-                vat_enabled=random.choice([True, False]),
-                tax_rate=16,
-                notes="[TEST] Auto-generated sales order",
-                items=items,
+            qty = random.randint(1, min(20, int(stock * 0.05)))
+            ok, msg = post_damaged_goods(
+                product_id=pid,
+                warehouse_id=wid,
+                quantity=qty,
+                reason=f"[TEST] {random.choice(DAMAGE_REASONS)}",
+                reference_number=f"TEST-DMG-{date.today().strftime('%Y%m%d')}-{i+1}",
             )
-            if not ok:
-                continue
-            stats["orders"] += 1
-
-            ok, msg = confirm_order(order_id)
             if ok:
-                stats["confirmed"] += 1
-            else:
-                continue
-
-            if random.random() < 0.5:
-                dispatch_items = []
-                for it in items:
-                    dispatch_items.append({
-                        "product_id": it["product_id"],
-                        "batch_id": None,
-                        "quantity": it["quantity"],
-                    })
-                ok, msg, disp_id = create_dispatch(
-                    order_id=order_id,
-                    warehouse_id=main_wh_id,
-                    dispatch_date=order_date + timedelta(days=1),
-                    notes="[TEST] Auto-generated dispatch",
-                    items=dispatch_items,
-                )
-                if ok:
-                    ok2, _ = confirm_dispatch(disp_id)
-                    if ok2:
-                        stats["dispatched"] += 1
-
-                        ok3, _, _ = create_invoice_from_order(order_id)
-                        if ok3:
-                            stats["invoiced"] += 1
-
-        return stats
-    except Exception as e:
-        print(f"Sales gen error: {e}")
-        return {"orders": 0, "dispatched": 0, "invoiced": 0}
+                created += 1
+        return created
     finally:
         conn.close()
 
@@ -444,8 +469,7 @@ def generate_sales_orders(count=10):
 # =========================================================
 # GENERATE: PURCHASE ORDERS + GRN
 # =========================================================
-def generate_purchase_orders(count=4):
-    """Create POs, approve them, create GRNs, confirm GRNs"""
+def generate_purchase_orders(count=6):
     from services_procurement import (
         create_purchase_order, approve_purchase_order,
         create_grn, confirm_grn,
@@ -453,7 +477,7 @@ def generate_purchase_orders(count=4):
 
     conn = get_db_connection()
     if not conn:
-        return {"pos": 0, "grns": 0}
+        return {"pos": 0, "grns": 0, "grns_confirmed": 0}
     try:
         suppliers = conn.execute(text("""
             SELECT id FROM suppliers WHERE supplier_code LIKE 'TST-SUP-%'
@@ -466,7 +490,7 @@ def generate_purchase_orders(count=4):
         )).fetchall()
 
         if not (suppliers and products and warehouses):
-            return {"pos": 0, "grns": 0}
+            return {"pos": 0, "grns": 0, "grns_confirmed": 0}
 
         main_wh = next((w for w in warehouses if w[1] == 'MAIN'), warehouses[0])
 
@@ -475,7 +499,6 @@ def generate_purchase_orders(count=4):
         for i in range(count):
             sup_id = random.choice(suppliers)[0]
             order_date = _rand_date(45)
-
             n_items = random.randint(1, 3)
             picked = random.sample(products, min(n_items, len(products)))
 
@@ -504,42 +527,215 @@ def generate_purchase_orders(count=4):
                 continue
             stats["approved"] += 1
 
-            grn_items = []
-            for pid, cost in picked:
-                qty = random.randint(50, 200)
-                grn_items.append({
-                    "product_id": pid,
-                    "quantity_received": qty,
-                    "quantity_rejected": 0,
-                    "unit_cost": float(cost or 0),
-                })
+            # 80% of POs get a GRN
+            if random.random() < 0.8:
+                grn_items = []
+                for pid, cost in picked:
+                    qty = random.randint(50, 200)
+                    grn_items.append({
+                        "product_id": pid,
+                        "quantity_received": qty,
+                        "quantity_rejected": random.choice([0, 0, 0, 5]),
+                        "unit_cost": float(cost or 0),
+                    })
 
-            ok, msg, grn_id = create_grn(
-                po_id=po_id,
-                warehouse_id=main_wh[0],
-                received_date=order_date + timedelta(days=random.randint(1, 7)),
-                notes="[TEST] Auto-generated GRN",
-                items=grn_items,
-            )
-            if ok:
-                stats["grns"] += 1
-                ok2, _ = confirm_grn(grn_id)
-                if ok2:
-                    stats["grns_confirmed"] += 1
+                ok, msg, grn_id = create_grn(
+                    po_id=po_id,
+                    warehouse_id=main_wh[0],
+                    received_date=order_date + timedelta(days=random.randint(1, 7)),
+                    notes="[TEST] Auto-generated GRN",
+                    items=grn_items,
+                )
+                if ok:
+                    stats["grns"] += 1
+                    ok2, _ = confirm_grn(grn_id)
+                    if ok2:
+                        stats["grns_confirmed"] += 1
 
         return stats
     except Exception as e:
         print(f"PO gen error: {e}")
-        return {"pos": 0, "grns": 0}
+        return {"pos": 0, "grns": 0, "grns_confirmed": 0}
     finally:
         conn.close()
 
 
 # =========================================================
-# GENERATE: PAYMENTS
+# GENERATE: SALES ORDERS + DISPATCH + DELIVERY + INVOICE
 # =========================================================
-def generate_payments(count=5):
-    """Record customer payments against test invoices"""
+def generate_sales_orders(count=15):
+    from services_sales import create_sales_order, confirm_order
+    from services_dispatch import create_dispatch, confirm_dispatch
+    from services_delivery import (
+        create_delivery_from_dispatch, confirm_delivery
+    )
+    from services_invoices import create_invoice_from_order
+    from services_inventory import get_stock_balance
+
+    conn = get_db_connection()
+    if not conn:
+        return {"orders": 0, "dispatched": 0, "delivered": 0, "invoiced": 0}
+    try:
+        customers = conn.execute(text("""
+            SELECT id FROM customers WHERE customer_code LIKE 'TST-CUST-%'
+        """)).fetchall()
+        products = conn.execute(text("""
+            SELECT id, product_code, selling_price, is_batch_tracked
+            FROM products WHERE product_code LIKE 'TPRD-%'
+        """)).fetchall()
+        warehouses = conn.execute(text(
+            "SELECT id, code FROM warehouses WHERE is_active = TRUE"
+        )).fetchall()
+        vehicles = conn.execute(text(
+            "SELECT id FROM vehicles WHERE plate_number LIKE 'KD%'"
+        )).fetchall()
+        drivers = conn.execute(text("SELECT id FROM drivers")).fetchall()
+
+        if not (customers and products and warehouses):
+            return {"orders": 0, "dispatched": 0, "delivered": 0, "invoiced": 0}
+
+        main_wh = next((w for w in warehouses if w[1] == 'MAIN'), warehouses[0])
+        main_wh_id = main_wh[0]
+
+        stats = {"orders": 0, "confirmed": 0, "dispatched": 0,
+                 "delivered": 0, "partial": 0, "invoiced": 0}
+
+        for i in range(count):
+            cust_id = random.choice(customers)[0]
+            order_date = _rand_date(60)
+            n_items = random.randint(1, 3)
+            picked = random.sample(products, min(n_items, len(products)))
+
+            items = []
+            for pid, pcode, price, bt in picked:
+                stock = get_stock_balance(pid, main_wh_id)
+                if stock < 20:
+                    continue
+                qty = random.randint(5, min(50, int(stock / 2)))
+                items.append({
+                    "product_id": pid,
+                    "quantity": qty,
+                    "unit_price": float(price or 0),
+                })
+
+            if not items:
+                continue
+
+            ok, msg, order_id = create_sales_order(
+                customer_id=cust_id,
+                order_date=order_date,
+                delivery_date=order_date + timedelta(days=random.randint(1, 5)),
+                vat_enabled=random.choice([True, False]),
+                tax_rate=16,
+                notes="[TEST] Auto-generated sales order",
+                items=items,
+            )
+            if not ok:
+                continue
+            stats["orders"] += 1
+
+            ok, msg = confirm_order(order_id)
+            if not ok:
+                continue
+            stats["confirmed"] += 1
+
+            # 70% of confirmed orders get dispatched
+            if random.random() > 0.7:
+                continue
+
+            dispatch_items = [{
+                "product_id": it["product_id"],
+                "batch_id": None,
+                "quantity": it["quantity"],
+            } for it in items]
+
+            driver_name = None
+            vehicle_id = None
+            if vehicles:
+                vehicle_id = random.choice(vehicles)[0]
+            if drivers:
+                driver_name = f"Driver {random.choice(drivers)[0]}"
+
+            ok, msg, disp_id = create_dispatch(
+                order_id=order_id,
+                warehouse_id=main_wh_id,
+                dispatch_date=order_date + timedelta(days=1),
+                vehicle_id=vehicle_id,
+                driver_name=driver_name,
+                notes="[TEST] Auto-generated dispatch",
+                items=dispatch_items,
+            )
+            if not ok:
+                continue
+            ok2, _ = confirm_dispatch(disp_id)
+            if not ok2:
+                continue
+            stats["dispatched"] += 1
+
+            # 80% of dispatches get delivery
+            if random.random() > 0.8:
+                # Still invoice
+                ok3, _, _ = create_invoice_from_order(order_id)
+                if ok3:
+                    stats["invoiced"] += 1
+                continue
+
+            ok, msg, dlv_id = create_delivery_from_dispatch(
+                dispatch_id=disp_id,
+                delivery_date=order_date + timedelta(days=2),
+            )
+            if not ok:
+                continue
+
+            # 70% full delivery, 30% partial
+            is_partial = random.random() < 0.3
+            if is_partial:
+                # Adjust one line item
+                from services_delivery import update_delivery_item, get_delivery_items
+                d_items = get_delivery_items(dlv_id)
+                if not d_items.empty:
+                    it = d_items.iloc[0]
+                    qd = float(it['quantity_dispatched'] or 0)
+                    shortfall = int(qd * random.uniform(0.1, 0.4))
+                    qrec = max(0, int(qd) - shortfall)
+                    update_delivery_item(
+                        it['id'],
+                        quantity_received=qrec,
+                        quantity_rejected=shortfall,
+                        rejection_reason=random.choice(["Damaged", "Short delivery", "Refused"]),
+                    )
+
+            ok, msg = confirm_delivery(
+                delivery_id=dlv_id,
+                received_by_name=f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
+                received_by_phone=_rand_phone(),
+                signature_ref=f"TESTREF-{random.randint(1000, 9999)}",
+                delivery_notes="[TEST] Auto-generated delivery confirmation",
+            )
+            if ok:
+                stats["delivered"] += 1
+                if is_partial:
+                    stats["partial"] += 1
+
+                # Invoice
+                ok3, _, _ = create_invoice_from_order(order_id)
+                if ok3:
+                    stats["invoiced"] += 1
+
+        return stats
+    except Exception as e:
+        print(f"Sales gen error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"orders": 0, "dispatched": 0, "delivered": 0, "invoiced": 0}
+    finally:
+        conn.close()
+
+
+# =========================================================
+# GENERATE: CUSTOMER PAYMENTS
+# =========================================================
+def generate_customer_payments(count=10):
     from services_payments import record_customer_payment
 
     conn = get_db_connection()
@@ -561,12 +757,13 @@ def generate_payments(count=5):
             balance = float(balance or 0)
             if balance <= 0:
                 continue
-            amount = balance if random.random() < 0.6 else round(balance * 0.5, 2)
+            # Mix of full, partial
+            amount = balance if random.random() < 0.5 else round(balance * random.uniform(0.3, 0.7), 2)
             ok, msg, _ = record_customer_payment(
                 customer_id=cust_id,
                 amount=amount,
                 payment_date=date.today() - timedelta(days=random.randint(1, 20)),
-                payment_method=random.choice(["Cash", "M-Pesa", "Bank Transfer"]),
+                payment_method=random.choice(["Cash", "M-Pesa", "Bank Transfer", "Cheque"]),
                 reference_number=f"TESTREF{random.randint(1000, 9999)}",
                 notes="[TEST] Auto-generated payment",
                 auto_allocate=True,
@@ -579,10 +776,50 @@ def generate_payments(count=5):
 
 
 # =========================================================
+# GENERATE: SUPPLIER PAYMENTS
+# =========================================================
+def generate_supplier_payments(count=3):
+    from services_payments import record_supplier_payment
+
+    conn = get_db_connection()
+    if not conn:
+        return 0
+    try:
+        pos = conn.execute(text("""
+            SELECT po.id, po.supplier_id, po.total_amount
+            FROM purchase_orders po
+            JOIN suppliers s ON po.supplier_id = s.id
+            WHERE s.supplier_code LIKE 'TST-SUP-%'
+              AND po.status IN ('Fully Received', 'Partially Received')
+            ORDER BY po.order_date ASC
+        """)).fetchall()
+
+        created = 0
+        for po_id, sup_id, total in pos[:count]:
+            total = float(total or 0)
+            if total <= 0:
+                continue
+            amount = total if random.random() < 0.7 else round(total * 0.5, 2)
+            ok, msg, _ = record_supplier_payment(
+                supplier_id=sup_id,
+                amount=amount,
+                payment_date=date.today() - timedelta(days=random.randint(1, 15)),
+                payment_method=random.choice(["Bank Transfer", "Cheque", "M-Pesa"]),
+                reference_number=f"TESTPO{random.randint(1000, 9999)}",
+                notes="[TEST] Auto-generated supplier payment",
+                auto_allocate=True,
+            )
+            if ok:
+                created += 1
+        return created
+    finally:
+        conn.close()
+
+
+# =========================================================
 # GENERATE: CONTAINER ISSUES + RETURNS
 # =========================================================
-def generate_containers(count=5):
-    """Issue containers to test customers, then return some"""
+def generate_containers(count=8):
     from services_containers import (
         issue_containers, return_containers, get_issue_items,
     )
@@ -605,15 +842,13 @@ def generate_containers(count=5):
 
         for i in range(count):
             cust_id = random.choice(customers)[0]
-            n_types = random.randint(1, 2)
+            n_types = random.randint(1, 3)
             picked = random.sample(containers, min(n_types, len(containers)))
 
-            items = []
-            for cid, _dep in picked:
-                items.append({
-                    "container_id": cid,
-                    "quantity": random.randint(5, 20),
-                })
+            items = [{
+                "container_id": cid,
+                "quantity": random.randint(5, 25),
+            } for cid, _dep in picked]
 
             ok, msg, issue_id = issue_containers(
                 customer_id=cust_id,
@@ -625,35 +860,41 @@ def generate_containers(count=5):
                 continue
             stats["issues"] += 1
 
-            if random.random() < 0.6:
-                issue_items = get_issue_items(issue_id)
-                if issue_items.empty:
+            # 70% get returned (partial or full)
+            if random.random() > 0.7:
+                continue
+
+            issue_items = get_issue_items(issue_id)
+            if issue_items.empty:
+                continue
+
+            return_lines = []
+            for _, it in issue_items.iterrows():
+                outstanding = float(it['outstanding'] or 0)
+                if outstanding <= 0:
                     continue
-                return_lines = []
-                for _, it in issue_items.iterrows():
-                    outstanding = float(it['outstanding'] or 0)
-                    if outstanding <= 0:
-                        continue
-                    return_qty = int(outstanding * random.choice([0.5, 1.0]))
-                    lost_qty = int(outstanding) - return_qty if random.random() < 0.3 else 0
-                    if return_qty + lost_qty <= 0:
-                        continue
-                    return_lines.append({
-                        "issue_item_id": it['id'],
-                        "container_id": it['container_id'],
-                        "quantity_returned": return_qty,
-                        "quantity_lost": lost_qty,
-                        "loss_reason": "Broken" if lost_qty > 0 else None,
-                    })
-                if return_lines:
-                    ok, _, _ = return_containers(
-                        issue_id=issue_id,
-                        return_date=date.today() - timedelta(days=random.randint(1, 5)),
-                        notes="[TEST] Auto-generated container return",
-                        items=return_lines,
-                    )
-                    if ok:
-                        stats["returns"] += 1
+                # Return 50-100%
+                frac = random.choice([0.5, 0.7, 1.0])
+                return_qty = int(outstanding * frac)
+                lost_qty = int(outstanding) - return_qty if random.random() < 0.3 else 0
+                if return_qty + lost_qty <= 0:
+                    continue
+                return_lines.append({
+                    "issue_item_id": it['id'],
+                    "container_id": it['container_id'],
+                    "quantity_returned": return_qty,
+                    "quantity_lost": lost_qty,
+                    "loss_reason": "Broken" if lost_qty > 0 else None,
+                })
+            if return_lines:
+                ok, _, _ = return_containers(
+                    issue_id=issue_id,
+                    return_date=date.today() - timedelta(days=random.randint(1, 5)),
+                    notes="[TEST] Auto-generated container return",
+                    items=return_lines,
+                )
+                if ok:
+                    stats["returns"] += 1
 
         return stats
     except Exception as e:
@@ -664,24 +905,17 @@ def generate_containers(count=5):
 
 
 # =========================================================
-# ORCHESTRATOR — FULL TEST DATA RUN
+# ORCHESTRATOR
 # =========================================================
 def generate_all(progress_callback=None, **kwargs):
-    """
-    Run the full test data generation pipeline.
-    Returns a summary dict with per-step counts AND errors.
-    """
     import traceback
 
     results = {
-        "users": 0,
-        "customers": 0,
-        "suppliers": 0,
-        "products": 0,
-        "opening_stock": 0,
-        "purchase_orders": {},
-        "sales_orders": {},
-        "payments": 0,
+        "users": 0, "customers": 0, "suppliers": 0, "products": 0,
+        "vehicles": 0, "drivers": 0,
+        "opening_stock": 0, "adjustments": 0, "damages": 0,
+        "purchase_orders": {}, "sales_orders": {},
+        "customer_payments": 0, "supplier_payments": 0,
         "containers": {},
         "errors": [],
     }
@@ -694,103 +928,104 @@ def generate_all(progress_callback=None, **kwargs):
         try:
             progress(f"▶ {name}...")
             out = fn(*args, **kw)
-            progress(f"✅ {name} done → {out}")
+            progress(f"✅ {name} done")
             return out
         except Exception as e:
-            err = f"{name}: {type(e).__name__}: {e}"
-            results["errors"].append(err)
+            results["errors"].append(f"{name}: {type(e).__name__}: {e}")
             results["errors"].append(traceback.format_exc())
-            progress(f"❌ {name} FAILED — see errors below")
+            progress(f"❌ {name} FAILED")
             return None
 
-    # --- Reference data pre-check ---
+    # Reference data check
     try:
         wh_count = len(read_sql("SELECT id FROM warehouses WHERE is_active = TRUE"))
         cat_count = len(read_sql("SELECT id FROM product_categories WHERE is_active = TRUE"))
         cont_count = len(read_sql("SELECT id FROM containers WHERE is_active = TRUE"))
         role_count = len(read_sql("SELECT id FROM roles WHERE is_active = TRUE"))
-        progress(f"📋 Ref data: {wh_count} warehouses, {cat_count} cats, "
-                 f"{cont_count} containers, {role_count} roles")
+        progress(f"📋 Ref: {wh_count} warehouses, {cat_count} cats, {cont_count} containers, {role_count} roles")
         if wh_count == 0:
-            results["errors"].append("⚠️ No warehouses — opening stock / POs / sales will skip")
-        if cat_count == 0:
-            results["errors"].append("⚠️ No product_categories — products insert may fail")
-        if cont_count == 0:
-            results["errors"].append("⚠️ No containers — container tests will skip")
-        if role_count == 0:
-            results["errors"].append("⚠️ No roles — user creation may fail")
+            results["errors"].append("⚠️ No warehouses")
     except Exception as e:
-        results["errors"].append(f"Ref data check failed: {e}")
+        results["errors"].append(f"Ref check failed: {e}")
 
-    # --- USERS ---
+    # Users
     users = step("Create users", generate_users, kwargs.get("n_users", 5))
     results["users"] = len(users) if users else 0
 
-    # --- CUSTOMERS ---
+    # Vehicles + drivers
+    vd = step("Vehicles + drivers", generate_vehicles_and_drivers) or {}
+    results["vehicles"] = len(vd.get("vehicles", []))
+    results["drivers"] = len(vd.get("drivers", []))
+
+    # Customers
     customers = step("Create customers", generate_customers, kwargs.get("n_customers", 10))
     results["customers"] = len(customers) if customers else 0
 
-    # --- SUPPLIERS ---
+    # Suppliers
     suppliers = step("Create suppliers", generate_suppliers, kwargs.get("n_suppliers", 5))
     results["suppliers"] = len(suppliers) if suppliers else 0
 
-    # --- PRODUCTS ---
+    # Products
     products = step("Create products", generate_products)
     results["products"] = len(products) if products else 0
 
-    # --- OPENING STOCK ---
+    # Opening stock
     if products:
-        results["opening_stock"] = step("Post opening stock", generate_opening_stock) or 0
-    else:
-        results["errors"].append("opening_stock skipped — no products created")
+        results["opening_stock"] = step("Opening stock", generate_opening_stock) or 0
 
-    # --- PURCHASE ORDERS / GRN ---
+    # Adjustments
+    if products:
+        results["adjustments"] = step("Stock adjustments",
+                                       generate_adjustments,
+                                       kwargs.get("n_adjustments", 4)) or 0
+
+    # Damages
+    if products:
+        results["damages"] = step("Damage records",
+                                   generate_damage_records,
+                                   kwargs.get("n_damages", 4)) or 0
+
+    # POs + GRN
     if suppliers and products:
         results["purchase_orders"] = step("Purchase orders + GRN",
                                           generate_purchase_orders,
-                                          kwargs.get("n_pos", 4)) or {}
-    else:
-        results["errors"].append("purchase_orders skipped — need suppliers and products")
+                                          kwargs.get("n_pos", 6)) or {}
 
-    # --- SALES ORDERS ---
+    # Sales cycle
     if customers and products:
-        results["sales_orders"] = step("Sales orders + dispatch + invoice",
+        results["sales_orders"] = step("Sales + dispatch + delivery + invoice",
                                        generate_sales_orders,
-                                       kwargs.get("n_sos", 10)) or {}
-    else:
-        results["errors"].append("sales_orders skipped — need customers and products")
+                                       kwargs.get("n_sos", 15)) or {}
 
-    # --- PAYMENTS ---
-    results["payments"] = step("Payments", generate_payments,
-                               kwargs.get("n_sos", 10)) or 0
+    # Customer payments
+    results["customer_payments"] = step("Customer payments",
+                                        generate_customer_payments,
+                                        kwargs.get("n_payments", 10)) or 0
 
-    # --- CONTAINERS ---
+    # Supplier payments
+    results["supplier_payments"] = step("Supplier payments",
+                                        generate_supplier_payments,
+                                        3) or 0
+
+    # Containers
     if customers:
         results["containers"] = step("Containers", generate_containers,
-                                     kwargs.get("n_container_issues", 5)) or {}
-    else:
-        results["errors"].append("containers skipped — no customers")
+                                     kwargs.get("n_container_issues", 8)) or {}
 
     progress("✅ Test data generation complete")
     return results
 
 
 # =========================================================
-# CLEANUP — REMOVE ALL TEST DATA
+# CLEANUP
 # =========================================================
 def cleanup_test_data():
-    """
-    Remove all records tagged as [TEST] or with TST-/TPRD-/TEST- prefixes.
-    Deletes children first to respect FK constraints.
-    Returns dict of deleted counts.
-    """
     conn = get_db_connection()
     if not conn:
         return {"error": "No DB connection"}
     deleted = {}
     try:
         deletes = [
-            # Payments
             ("payment_allocations",
              "payment_id IN (SELECT id FROM payments WHERE payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%')"),
             ("supplier_payment_allocations",
@@ -798,7 +1033,6 @@ def cleanup_test_data():
             ("payments",
              "payment_number LIKE 'TPAY-%' OR notes LIKE '%[TEST]%'"),
 
-            # Containers
             ("container_return_items",
              "return_id IN (SELECT id FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%')"),
             ("container_returns",
@@ -808,25 +1042,21 @@ def cleanup_test_data():
             ("container_issues",
              "issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'"),
 
-            # Delivery
             ("delivery_items",
              "delivery_id IN (SELECT id FROM deliveries WHERE delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%')"),
             ("deliveries",
              "delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%'"),
 
-            # Dispatch
             ("dispatch_items",
              "dispatch_id IN (SELECT id FROM dispatches WHERE dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%')"),
             ("dispatches",
              "dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%'"),
 
-            # Invoice
             ("invoice_items",
              "invoice_id IN (SELECT id FROM invoices WHERE notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'))"),
             ("invoices",
              "notes LIKE '%[TEST]%' OR order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
 
-            # Sales orders
             ("sales_order_items",
              "order_id IN (SELECT id FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%')"),
             ("stock_reservations",
@@ -834,39 +1064,35 @@ def cleanup_test_data():
             ("sales_orders",
              "order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'"),
 
-            # GRN
             ("goods_received_note_items",
              "grn_id IN (SELECT id FROM goods_received_notes WHERE grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%')"),
             ("goods_received_notes",
              "grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%'"),
 
-            # PO
             ("purchase_order_items",
              "po_id IN (SELECT id FROM purchase_orders WHERE po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%')"),
             ("purchase_orders",
              "po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%'"),
 
-            # Stock movements — uses `reason` NOT `notes`
+            # Stock movements: uses `reason`, not `notes`
             ("stock_movements",
              "reason LIKE '%[TEST]%' OR reference_number LIKE 'TEST-%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
 
-            # Batches — has `notes`
             ("product_batches",
              "notes LIKE '%[TEST]%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
 
-            # Products
             ("products", "product_code LIKE 'TPRD-%'"),
-
-            # Customers / suppliers
             ("customers", "customer_code LIKE 'TST-CUST-%'"),
             ("suppliers", "supplier_code LIKE 'TST-SUP-%'"),
 
-            # Users
             ("user_login_history",
              "user_id IN (SELECT id FROM users WHERE username LIKE 'test_%')"),
             ("users", "username LIKE 'test_%'"),
 
-            # Audit logs — cast JSONB to text
+            ("vehicles", "notes LIKE '%[TEST]%'"),
+            ("drivers", "notes LIKE '%[TEST]%'"),
+
+            # audit_logs: new_values/old_values are JSONB — cast to text
             ("audit_logs",
              "new_values::text LIKE '%[TEST]%' "
              "OR old_values::text LIKE '%[TEST]%' "
@@ -875,9 +1101,7 @@ def cleanup_test_data():
 
         for table, condition in deletes:
             try:
-                result = conn.execute(
-                    text(f"DELETE FROM {table} WHERE {condition}")
-                )
+                result = conn.execute(text(f"DELETE FROM {table} WHERE {condition}"))
                 deleted[table] = int(result.rowcount or 0)
             except Exception as e:
                 deleted[table] = f"error: {e}"
@@ -894,18 +1118,14 @@ def cleanup_test_data():
 
 
 def count_test_data():
-    """Preview what would be deleted.
-
-    NOTE: `stock_movements` uses `reason` (not `notes`).
-    """
     queries = {
         "test users":       "SELECT COUNT(*) FROM users WHERE username LIKE 'test_%'",
         "test customers":   "SELECT COUNT(*) FROM customers WHERE customer_code LIKE 'TST-CUST-%'",
         "test suppliers":   "SELECT COUNT(*) FROM suppliers WHERE supplier_code LIKE 'TST-SUP-%'",
         "test products":    "SELECT COUNT(*) FROM products WHERE product_code LIKE 'TPRD-%'",
-        "test sales orders":"SELECT COUNT(*) FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'",
         "test POs":         "SELECT COUNT(*) FROM purchase_orders WHERE po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%'",
         "test GRNs":        "SELECT COUNT(*) FROM goods_received_notes WHERE grn_number LIKE 'TGRN-%' OR notes LIKE '%[TEST]%'",
+        "test sales orders":"SELECT COUNT(*) FROM sales_orders WHERE order_number LIKE 'TSO-%' OR notes LIKE '%[TEST]%'",
         "test dispatches":  "SELECT COUNT(*) FROM dispatches WHERE dispatch_number LIKE 'TDSP-%' OR notes LIKE '%[TEST]%'",
         "test deliveries":  "SELECT COUNT(*) FROM deliveries WHERE delivery_number LIKE 'TDLV-%' OR notes LIKE '%[TEST]%'",
         "test invoices":    "SELECT COUNT(*) FROM invoices WHERE notes LIKE '%[TEST]%'",
@@ -914,6 +1134,8 @@ def count_test_data():
             "SELECT COUNT(*) FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'",
         "test container returns":
             "SELECT COUNT(*) FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'",
+        "test vehicles":    "SELECT COUNT(*) FROM vehicles WHERE notes LIKE '%[TEST]%'",
+        "test drivers":     "SELECT COUNT(*) FROM drivers WHERE notes LIKE '%[TEST]%'",
         "test stock moves":
             "SELECT COUNT(*) FROM stock_movements "
             "WHERE reason LIKE '%[TEST]%' "
