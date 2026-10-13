@@ -5,6 +5,11 @@
 # Every table gets populated. All booleans use Python True/False.
 # All stock changes go through the ledger (post_movement).
 # Every record is tagged [TEST] for safe cleanup.
+#
+# Idempotent:
+#   - Customers, suppliers, products, opening stock skip if already exist.
+#   - All other generators append safely on re-run.
+#   - No duplicate-key crashes.
 # =========================================================
 
 import streamlit as st
@@ -94,6 +99,13 @@ def _rand_email(name):
     return f"{safe}@example.test"
 
 
+def _ok(result):
+    """Extract success bool from (ok, msg) or (ok, msg, id) tuples."""
+    if isinstance(result, tuple):
+        return bool(result[0])
+    return bool(result)
+
+
 # =========================================================
 # PREVIEW / DRY RUN
 # =========================================================
@@ -141,6 +153,15 @@ def generate_users(count=5):
             fn = random.choice(FIRST_NAMES)
             ln = random.choice(LAST_NAMES)
             uname = f"test_{fn.lower()}_{i+1}"
+
+            # Skip if user exists
+            existing = conn.execute(text(
+                "SELECT id FROM users WHERE LOWER(username) = LOWER(:u)"
+            ), {"u": uname}).fetchone()
+            if existing:
+                created.append(existing[0])
+                continue
+
             role = random.choice(role_names) if role_names else "Sales Officer"
 
             ok, msg, uid, _ = create_user(
@@ -171,29 +192,53 @@ def generate_vehicles_and_drivers():
     created_vehicles = []
     created_drivers = []
 
-    for plate, desc, cap in VEHICLE_TEMPLATES:
-        ok, msg, vid = create_vehicle(plate, desc, cap,
-                                       notes="[TEST] Auto-generated vehicle")
-        if ok and vid:
-            created_vehicles.append(vid)
+    conn = get_db_connection()
+    if not conn:
+        return {"vehicles": [], "drivers": []}
 
-    for i in range(3):
-        fn = random.choice(FIRST_NAMES)
-        ln = random.choice(LAST_NAMES)
-        ok, msg, did = create_driver(
-            name=f"{fn} {ln}",
-            phone=_rand_phone(),
-            license_number=f"DL{random.randint(100000, 999999)}",
-            notes="[TEST] Auto-generated driver",
-        )
-        if ok and did:
-            created_drivers.append(did)
+    try:
+        # Vehicles
+        for plate, desc, cap in VEHICLE_TEMPLATES:
+            existing = conn.execute(text(
+                "SELECT id FROM vehicles WHERE LOWER(plate_number) = LOWER(:p)"
+            ), {"p": plate}).fetchone()
+            if existing:
+                created_vehicles.append(existing[0])
+                continue
+            ok, msg, vid = create_vehicle(plate, desc, cap,
+                                           notes="[TEST] Auto-generated vehicle")
+            if ok and vid:
+                created_vehicles.append(vid)
+
+        # Drivers
+        for i in range(3):
+            fn = random.choice(FIRST_NAMES)
+            ln = random.choice(LAST_NAMES)
+            name = f"{fn} {ln}"
+            # No unique constraint on driver names, but skip if exists
+            existing = conn.execute(text(
+                "SELECT id FROM drivers WHERE name = :n AND notes LIKE '%[TEST]%'"
+            ), {"n": name}).fetchone()
+            if existing:
+                created_drivers.append(existing[0])
+                continue
+
+            ok, msg, did = create_driver(
+                name=name,
+                phone=_rand_phone(),
+                license_number=f"DL{random.randint(100000, 999999)}",
+                notes="[TEST] Auto-generated driver",
+            )
+            if ok and did:
+                created_drivers.append(did)
+    finally:
+        conn.close()
 
     return {"vehicles": created_vehicles, "drivers": created_drivers}
 
 
 # =========================================================
-# GENERATE: CUSTOMERS
+# GENERATE: CUSTOMERS (idempotent)
 # =========================================================
 def generate_customers(count=10):
     created = []
@@ -206,6 +251,15 @@ def generate_customers(count=10):
             continue
         try:
             code = f"TST-CUST-{str(i+1).zfill(4)}"
+
+            # Skip if already exists
+            existing = conn.execute(text(
+                "SELECT id FROM customers WHERE customer_code = :c"
+            ), {"c": code}).fetchone()
+            if existing:
+                created.append(existing[0])
+                continue
+
             credit = random.choice([0, 0, 50000, 100000, 250000])
             result = conn.execute(text("""
                 INSERT INTO customers (
@@ -244,7 +298,7 @@ def generate_customers(count=10):
 
 
 # =========================================================
-# GENERATE: SUPPLIERS
+# GENERATE: SUPPLIERS (idempotent)
 # =========================================================
 def generate_suppliers(count=5):
     conn = get_db_connection()
@@ -255,6 +309,15 @@ def generate_suppliers(count=5):
         for i in range(count):
             name = f"[TEST] {random.choice(SUPPLIER_NAMES)} {i+1}"
             code = f"TST-SUP-{str(i+1).zfill(4)}"
+
+            # Skip if already exists
+            existing = conn.execute(text(
+                "SELECT id FROM suppliers WHERE supplier_code = :c"
+            ), {"c": code}).fetchone()
+            if existing:
+                created.append(existing[0])
+                continue
+
             result = conn.execute(text("""
                 INSERT INTO suppliers (
                     supplier_code, supplier_name, contact_person,
@@ -288,7 +351,7 @@ def generate_suppliers(count=5):
 
 
 # =========================================================
-# GENERATE: PRODUCTS
+# GENERATE: PRODUCTS (idempotent)
 # =========================================================
 def generate_products():
     conn = get_db_connection()
@@ -344,7 +407,7 @@ def generate_products():
 
 
 # =========================================================
-# GENERATE: OPENING STOCK
+# GENERATE: OPENING STOCK (idempotent, batches Released)
 # =========================================================
 def generate_opening_stock():
     from services_inventory import post_opening_stock
@@ -361,22 +424,47 @@ def generate_opening_stock():
 
         count = 0
         for pid, pcode, is_batch in products:
+            # Skip if opening stock already posted for this product
+            already = conn.execute(text("""
+                SELECT 1 FROM stock_movements
+                WHERE product_id = :pid
+                  AND movement_type = 'OPENING'
+                  AND reason LIKE '%[TEST]%'
+                LIMIT 1
+            """), {"pid": int(pid)}).fetchone()
+            if already:
+                count += 1
+                continue
+
             qty = random.randint(500, 2000)
             batch_number = None
             if is_batch:
                 batch_number = generate_batch_number(pcode)
 
-            ok, msg = post_opening_stock(
-                product_id=pid,
+            # post_opening_stock returns (ok, msg, movement_id)
+            # Force batch status = Released so sellable stock is available
+            result = post_opening_stock(
+                product_id=int(pid),
                 quantity=qty,
                 unit_cost=0,
                 batch_number=batch_number,
                 production_date=date.today() - timedelta(days=random.randint(1, 30)),
                 expiry_date=date.today() + timedelta(days=random.randint(180, 730)),
                 reason="[TEST] Opening stock for test data",
+                batch_status="Released",
             )
-            if ok:
+            if _ok(result):
                 count += 1
+
+        # Force any lingering Quarantined [TEST] batches to Released
+        conn.execute(text("""
+            UPDATE product_batches
+            SET quality_status = 'Released'
+            WHERE notes LIKE '%[TEST]%'
+              AND quality_status = 'Quarantined'
+        """))
+        conn.commit()
+
         return count
     finally:
         conn.close()
@@ -408,16 +496,16 @@ def generate_adjustments(count=4):
             current = get_stock_balance(pid, wid)
             if current <= 0:
                 continue
-            # Adjust by ±5-15%
             variance = random.choice([-1, 1]) * int(current * random.uniform(0.05, 0.15))
             new_qty = max(0, current + variance)
-            ok, msg = post_adjustment(
-                product_id=pid,
-                warehouse_id=wid,
+
+            result = post_adjustment(
+                product_id=int(pid),
+                warehouse_id=int(wid),
                 new_quantity=new_qty,
                 reason=f"[TEST] {random.choice(ADJUSTMENT_REASONS)}",
             )
-            if ok:
+            if _ok(result):
                 created += 1
         return created
     finally:
@@ -428,8 +516,7 @@ def generate_adjustments(count=4):
 # GENERATE: DAMAGE RECORDS
 # =========================================================
 def generate_damage_records(count=4):
-    from services_procurement import post_damaged_goods
-    from services_inventory import get_stock_balance
+    from services_inventory import post_damaged_goods, get_stock_balance
 
     conn = get_db_connection()
     if not conn:
@@ -452,14 +539,15 @@ def generate_damage_records(count=4):
             if stock < 10:
                 continue
             qty = random.randint(1, min(20, int(stock * 0.05)))
-            ok, msg = post_damaged_goods(
-                product_id=pid,
-                warehouse_id=wid,
+
+            result = post_damaged_goods(
+                product_id=int(pid),
+                warehouse_id=int(wid),
                 quantity=qty,
                 reason=f"[TEST] {random.choice(DAMAGE_REASONS)}",
                 reference_number=f"TEST-DMG-{date.today().strftime('%Y%m%d')}-{i+1}",
             )
-            if ok:
+            if _ok(result):
                 created += 1
         return created
     finally:
@@ -506,13 +594,13 @@ def generate_purchase_orders(count=6):
             for pid, cost in picked:
                 qty = random.randint(100, 500)
                 items.append({
-                    "product_id": pid,
+                    "product_id": int(pid),
                     "quantity_ordered": qty,
                     "unit_cost": float(cost or 0),
                 })
 
             ok, msg, po_id = create_purchase_order(
-                supplier_id=sup_id,
+                supplier_id=int(sup_id),
                 order_date=order_date,
                 expected_date=order_date + timedelta(days=7),
                 notes="[TEST] Auto-generated purchase order",
@@ -522,8 +610,7 @@ def generate_purchase_orders(count=6):
                 continue
             stats["pos"] += 1
 
-            ok, msg = approve_purchase_order(po_id)
-            if not ok:
+            if not _ok(approve_purchase_order(po_id)):
                 continue
             stats["approved"] += 1
 
@@ -533,28 +620,29 @@ def generate_purchase_orders(count=6):
                 for pid, cost in picked:
                     qty = random.randint(50, 200)
                     grn_items.append({
-                        "product_id": pid,
+                        "product_id": int(pid),
                         "quantity_received": qty,
                         "quantity_rejected": random.choice([0, 0, 0, 5]),
                         "unit_cost": float(cost or 0),
                     })
 
                 ok, msg, grn_id = create_grn(
-                    po_id=po_id,
-                    warehouse_id=main_wh[0],
+                    po_id=int(po_id),
+                    warehouse_id=int(main_wh[0]),
                     received_date=order_date + timedelta(days=random.randint(1, 7)),
                     notes="[TEST] Auto-generated GRN",
                     items=grn_items,
                 )
                 if ok:
                     stats["grns"] += 1
-                    ok2, _ = confirm_grn(grn_id)
-                    if ok2:
+                    if _ok(confirm_grn(grn_id)):
                         stats["grns_confirmed"] += 1
 
         return stats
     except Exception as e:
         print(f"PO gen error: {e}")
+        import traceback
+        traceback.print_exc()
         return {"pos": 0, "grns": 0, "grns_confirmed": 0}
     finally:
         conn.close()
@@ -567,7 +655,8 @@ def generate_sales_orders(count=15):
     from services_sales import create_sales_order, confirm_order
     from services_dispatch import create_dispatch, confirm_dispatch
     from services_delivery import (
-        create_delivery_from_dispatch, confirm_delivery
+        create_delivery_from_dispatch, confirm_delivery,
+        update_delivery_item, get_delivery_items,
     )
     from services_invoices import create_invoice_from_order
     from services_inventory import get_stock_balance
@@ -613,7 +702,7 @@ def generate_sales_orders(count=15):
                     continue
                 qty = random.randint(5, min(50, int(stock / 2)))
                 items.append({
-                    "product_id": pid,
+                    "product_id": int(pid),
                     "quantity": qty,
                     "unit_price": float(price or 0),
                 })
@@ -622,7 +711,7 @@ def generate_sales_orders(count=15):
                 continue
 
             ok, msg, order_id = create_sales_order(
-                customer_id=cust_id,
+                customer_id=int(cust_id),
                 order_date=order_date,
                 delivery_date=order_date + timedelta(days=random.randint(1, 5)),
                 vat_enabled=random.choice([True, False]),
@@ -634,64 +723,56 @@ def generate_sales_orders(count=15):
                 continue
             stats["orders"] += 1
 
-            ok, msg = confirm_order(order_id)
-            if not ok:
+            if not _ok(confirm_order(order_id)):
                 continue
             stats["confirmed"] += 1
 
-            # 70% of confirmed orders get dispatched
             if random.random() > 0.7:
                 continue
 
             dispatch_items = [{
-                "product_id": it["product_id"],
+                "product_id": int(it["product_id"]),
                 "batch_id": None,
                 "quantity": it["quantity"],
             } for it in items]
 
+            vehicle_id = random.choice(vehicles)[0] if vehicles else None
             driver_name = None
-            vehicle_id = None
-            if vehicles:
-                vehicle_id = random.choice(vehicles)[0]
             if drivers:
                 driver_name = f"Driver {random.choice(drivers)[0]}"
 
             ok, msg, disp_id = create_dispatch(
-                order_id=order_id,
-                warehouse_id=main_wh_id,
+                order_id=int(order_id),
+                warehouse_id=int(main_wh_id),
                 dispatch_date=order_date + timedelta(days=1),
-                vehicle_id=vehicle_id,
+                vehicle_id=int(vehicle_id) if vehicle_id else None,
                 driver_name=driver_name,
                 notes="[TEST] Auto-generated dispatch",
                 items=dispatch_items,
             )
             if not ok:
                 continue
-            ok2, _ = confirm_dispatch(disp_id)
-            if not ok2:
+            if not _ok(confirm_dispatch(disp_id)):
                 continue
             stats["dispatched"] += 1
 
             # 80% of dispatches get delivery
             if random.random() > 0.8:
-                # Still invoice
-                ok3, _, _ = create_invoice_from_order(order_id)
-                if ok3:
+                inv_res = create_invoice_from_order(order_id)
+                if _ok(inv_res):
                     stats["invoiced"] += 1
                 continue
 
             ok, msg, dlv_id = create_delivery_from_dispatch(
-                dispatch_id=disp_id,
+                dispatch_id=int(disp_id),
                 delivery_date=order_date + timedelta(days=2),
             )
             if not ok:
                 continue
 
-            # 70% full delivery, 30% partial
+            # 30% partial deliveries
             is_partial = random.random() < 0.3
             if is_partial:
-                # Adjust one line item
-                from services_delivery import update_delivery_item, get_delivery_items
                 d_items = get_delivery_items(dlv_id)
                 if not d_items.empty:
                     it = d_items.iloc[0]
@@ -699,14 +780,14 @@ def generate_sales_orders(count=15):
                     shortfall = int(qd * random.uniform(0.1, 0.4))
                     qrec = max(0, int(qd) - shortfall)
                     update_delivery_item(
-                        it['id'],
+                        int(it['id']),
                         quantity_received=qrec,
                         quantity_rejected=shortfall,
                         rejection_reason=random.choice(["Damaged", "Short delivery", "Refused"]),
                     )
 
             ok, msg = confirm_delivery(
-                delivery_id=dlv_id,
+                delivery_id=int(dlv_id),
                 received_by_name=f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}",
                 received_by_phone=_rand_phone(),
                 signature_ref=f"TESTREF-{random.randint(1000, 9999)}",
@@ -717,9 +798,8 @@ def generate_sales_orders(count=15):
                 if is_partial:
                     stats["partial"] += 1
 
-                # Invoice
-                ok3, _, _ = create_invoice_from_order(order_id)
-                if ok3:
+                inv_res = create_invoice_from_order(order_id)
+                if _ok(inv_res):
                     stats["invoiced"] += 1
 
         return stats
@@ -757,10 +837,9 @@ def generate_customer_payments(count=10):
             balance = float(balance or 0)
             if balance <= 0:
                 continue
-            # Mix of full, partial
             amount = balance if random.random() < 0.5 else round(balance * random.uniform(0.3, 0.7), 2)
             ok, msg, _ = record_customer_payment(
-                customer_id=cust_id,
+                customer_id=int(cust_id),
                 amount=amount,
                 payment_date=date.today() - timedelta(days=random.randint(1, 20)),
                 payment_method=random.choice(["Cash", "M-Pesa", "Bank Transfer", "Cheque"]),
@@ -801,7 +880,7 @@ def generate_supplier_payments(count=3):
                 continue
             amount = total if random.random() < 0.7 else round(total * 0.5, 2)
             ok, msg, _ = record_supplier_payment(
-                supplier_id=sup_id,
+                supplier_id=int(sup_id),
                 amount=amount,
                 payment_date=date.today() - timedelta(days=random.randint(1, 15)),
                 payment_method=random.choice(["Bank Transfer", "Cheque", "M-Pesa"]),
@@ -846,12 +925,12 @@ def generate_containers(count=8):
             picked = random.sample(containers, min(n_types, len(containers)))
 
             items = [{
-                "container_id": cid,
+                "container_id": int(cid),
                 "quantity": random.randint(5, 25),
             } for cid, _dep in picked]
 
             ok, msg, issue_id = issue_containers(
-                customer_id=cust_id,
+                customer_id=int(cust_id),
                 issue_date=date.today() - timedelta(days=random.randint(5, 30)),
                 notes="[TEST] Auto-generated container issue",
                 items=items,
@@ -860,7 +939,6 @@ def generate_containers(count=8):
                 continue
             stats["issues"] += 1
 
-            # 70% get returned (partial or full)
             if random.random() > 0.7:
                 continue
 
@@ -873,22 +951,21 @@ def generate_containers(count=8):
                 outstanding = float(it['outstanding'] or 0)
                 if outstanding <= 0:
                     continue
-                # Return 50-100%
                 frac = random.choice([0.5, 0.7, 1.0])
                 return_qty = int(outstanding * frac)
                 lost_qty = int(outstanding) - return_qty if random.random() < 0.3 else 0
                 if return_qty + lost_qty <= 0:
                     continue
                 return_lines.append({
-                    "issue_item_id": it['id'],
-                    "container_id": it['container_id'],
+                    "issue_item_id": int(it['id']),
+                    "container_id": int(it['container_id']),
                     "quantity_returned": return_qty,
                     "quantity_lost": lost_qty,
                     "loss_reason": "Broken" if lost_qty > 0 else None,
                 })
             if return_lines:
                 ok, _, _ = return_containers(
-                    issue_id=issue_id,
+                    issue_id=int(issue_id),
                     return_date=date.today() - timedelta(days=random.randint(1, 5)),
                     notes="[TEST] Auto-generated container return",
                     items=return_lines,
@@ -899,6 +976,8 @@ def generate_containers(count=8):
         return stats
     except Exception as e:
         print(f"Container gen error: {e}")
+        import traceback
+        traceback.print_exc()
         return {"issues": 0, "returns": 0}
     finally:
         conn.close()
@@ -1074,7 +1153,7 @@ def cleanup_test_data():
             ("purchase_orders",
              "po_number LIKE 'TPO-%' OR notes LIKE '%[TEST]%'"),
 
-            # Stock movements: uses `reason`, not `notes`
+            # stock_movements uses `reason` not `notes`
             ("stock_movements",
              "reason LIKE '%[TEST]%' OR reference_number LIKE 'TEST-%' OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')"),
 
@@ -1092,7 +1171,7 @@ def cleanup_test_data():
             ("vehicles", "notes LIKE '%[TEST]%'"),
             ("drivers", "notes LIKE '%[TEST]%'"),
 
-            # audit_logs: new_values/old_values are JSONB — cast to text
+            # audit_logs.new_values is JSONB — cast to text
             ("audit_logs",
              "new_values::text LIKE '%[TEST]%' "
              "OR old_values::text LIKE '%[TEST]%' "
