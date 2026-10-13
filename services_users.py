@@ -46,20 +46,8 @@ def get_users(search=None, role_id=None, active_only=False):
     """
     params = {}
     if active_only:
-        query += " AND u.is_active = 1"
-    if role_id:
-        query += " AND u.role_id = :rid"
-        params["rid"] = role_id
-    if search:
-        query += """ AND (
-            LOWER(u.username) LIKE :s
-            OR LOWER(u.email) LIKE :s
-            OR LOWER(u.first_name) LIKE :s
-            OR LOWER(u.last_name) LIKE :s
-        )"""
-        params["s"] = f"%{search.lower()}%"
-    query += " ORDER BY u.id DESC"
-    return read_sql(query, params if params else None)
+        query += " AND u.is_active = :active"
+        params["active"] = True
 
 
 def get_user(user_id):
@@ -300,10 +288,12 @@ def touch_login(user_id, ip=None, user_agent=None, success=True, reason=None):
 # =========================================================
 def get_roles(active_only=True):
     query = "SELECT * FROM roles WHERE 1=1"
+    params = {}
     if active_only:
-        query += " AND is_active = 1"
+        query += " AND is_active = :active"
+        params["active"] = True
     query += " ORDER BY name"
-    return read_sql(query)
+    return read_sql(query, params if params else None)
 
 
 def get_role(role_id):
@@ -327,9 +317,9 @@ def create_role(name, description=None):
 
         result = conn.execute(text("""
             INSERT INTO roles (name, description, is_active, created_at)
-            VALUES (:n, :d, 1, CURRENT_TIMESTAMP)
+            VALUES (:n, :d, :active, CURRENT_TIMESTAMP)
             RETURNING id
-        """), {"n": name.strip(), "d": description})
+        """), {"n": name.strip(), "d": description, "active": True})
         role_id = result.fetchone()[0]
         conn.commit()
 
@@ -374,7 +364,7 @@ def get_users_count_by_role():
     return read_sql("""
         SELECT r.name as role_name, COUNT(u.id) as user_count
         FROM roles r
-        LEFT JOIN users u ON u.role_id = r.id AND u.is_active = 1
+        LEFT JOIN users u ON u.role_id = r.id AND u.is_active = TRUE
         GROUP BY r.name
         ORDER BY r.name
     """)
