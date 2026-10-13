@@ -374,10 +374,11 @@ def sidebar_navigation():
     
     return st.session_state.page
 
-# =========================================================
-# DASHBOARD
-# =========================================================
 def dashboard_page():
+    import pandas as pd
+    from datetime import date, timedelta
+    from database import read_sql
+
     st.markdown("""
     <style>
         .stApp {
@@ -391,108 +392,511 @@ def dashboard_page():
             box-shadow: 0 4px 12px rgba(14, 165, 233, 0.1) !important;
         }
         h1, h2, h3, h4, h5, h6 { color: #0c4a6e !important; }
+        .kpi-card {
+            background: white;
+            padding: 18px;
+            border-radius: 12px;
+            border-left: 4px solid #0284c7;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 12px;
+        }
+        .kpi-label { color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .kpi-value { color: #0c4a6e; font-size: 26px; font-weight: 700; margin: 4px 0; }
+        .kpi-delta { font-size: 12px; }
+        .kpi-delta.up { color: #16a34a; }
+        .kpi-delta.down { color: #dc2626; }
+        .alert-card {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .alert-danger {
+            background: #fee2e2;
+            border-left-color: #dc2626;
+        }
     </style>
     """, unsafe_allow_html=True)
-    
-    st.markdown("""
+
+    # ---------------- Header ----------------
+    user = st.session_state.get('full_name') or st.session_state.get('user') or 'User'
+    role = st.session_state.get('role') or ''
+    today_str = date.today().strftime('%A, %d %B %Y')
+
+    st.markdown(f"""
     <div style="
         background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);
         padding: 24px 28px; border-radius: 16px; border-left: 6px solid #0284c7;
         margin-bottom: 24px; box-shadow: 0 6px 16px rgba(14, 165, 233, 0.2);
     ">
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <span style="font-size: 36px;">✅</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
             <div>
                 <h2 style="color: #0c4a6e; margin: 0; font-weight: 700; font-size: 24px;">
-                    Welcome to Amigoz Water Distilling Company ERP
+                    👋 Welcome back, {user}
                 </h2>
                 <p style="color: #0369a1; margin: 6px 0 0; font-size: 15px;">
-                    Your all-in-one solution for managing products, suppliers, customers, and more.
+                    {today_str} · {role}
                 </p>
             </div>
+            <div style="font-size: 48px;">💧</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Fetch real counts
-    conn = get_db_connection()
-    product_count = supplier_count = customer_count = user_count = 0
-    
-    if conn:
-        try:
-            for table, var in [
-                ("products", "product_count"),
-                ("suppliers", "supplier_count"),
-                ("customers", "customer_count"),
-                ("users", "user_count"),
-            ]:
-                try:
-                    result = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
-                    if var == "product_count": product_count = result or 0
-                    elif var == "supplier_count": supplier_count = result or 0
-                    elif var == "customer_count": customer_count = result or 0
-                    elif var == "user_count": user_count = result or 0
-                except:
-                    pass
-        finally:
-            conn.close()
-    
-    col1, col2, col3, col4 = st.columns(4)
+
+    # ---------------- Filters ----------------
+    col1, col2, col3 = st.columns([2, 2, 3])
     with col1:
-        st.metric("📦 Products", product_count)
+        period = st.selectbox("Period", ["Last 7 days", "Last 30 days",
+                                          "Last 90 days", "Year to date"],
+                              key="dash_period")
     with col2:
-        st.metric("🏭 Suppliers", supplier_count)
-    with col3:
-        st.metric("👥 Customers", customer_count)
-    with col4:
-        st.metric("👤 Users", user_count)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    
-    with col1:
-        st.markdown("#### 📊 Production Trends")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=days, y=[1200, 1900, 1500, 2100, 1800, 1400, 1600],
-            mode='lines+markers',
-            line=dict(color='#0ea5e9', width=3),
-            fill='tozeroy',
-            fillcolor='rgba(14, 165, 233, 0.1)'
-        ))
-        fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0),
-                          showlegend=False, plot_bgcolor='rgba(255,255,255,0.5)',
-                          paper_bgcolor='rgba(255,255,255,0.5)')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("#### 💰 Sales Overview")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=days, y=[5000, 7500, 6000, 9000, 8500, 5500, 7000],
-            marker_color='#0ea5e9'
-        ))
-        fig.update_layout(height=300, margin=dict(l=0, r=0, t=20, b=0),
-                          showlegend=False, plot_bgcolor='rgba(255,255,255,0.5)',
-                          paper_bgcolor='rgba(255,255,255,0.5)')
-        st.plotly_chart(fig, use_container_width=True)
-   
-    # Reorder alerts widget
-    st.markdown("---")
-    st.markdown("#### ⚠️ Reorder Alerts")
-    from services_procurement import get_reorder_alerts
-    reorder_df = get_reorder_alerts()
-    if reorder_df.empty:
-        st.success("✅ All products above reorder level")
+        warehouse_filter = st.selectbox("Warehouse", ["All Warehouses"] + [
+            r['code'] for _, r in read_sql(
+                "SELECT code FROM warehouses WHERE is_active = TRUE ORDER BY code"
+            ).iterrows()
+        ], key="dash_wh")
+
+    # Compute date range
+    today = date.today()
+    if period == "Last 7 days":
+        from_date = today - timedelta(days=7)
+    elif period == "Last 30 days":
+        from_date = today - timedelta(days=30)
+    elif period == "Last 90 days":
+        from_date = today - timedelta(days=90)
     else:
-        st.warning(f"⚠️ {len(reorder_df)} product(s) below reorder level")
-        st.dataframe(
-            reorder_df[['product_code', 'product_name', 'current_stock',
-                        'reorder_level']].head(10),
-            use_container_width=True, hide_index=True,
-        )
+        from_date = date(today.year, 1, 1)
+
+    wh_clause = ""
+    wh_params = {}
+    if warehouse_filter != "All Warehouses":
+        wh_clause = " AND w.code = :wh_code "
+        wh_params["wh_code"] = warehouse_filter
+
+    # =========================================================
+    # KPI ROW 1 — Business health
+    # =========================================================
+    st.markdown("### 📊 Business Overview")
+
+    # Counts
+    counts_df = read_sql("""
+        SELECT
+            (SELECT COUNT(*) FROM products WHERE is_active = TRUE AND product_code NOT LIKE 'TPRD-%') AS products,
+            (SELECT COUNT(*) FROM customers WHERE is_active = TRUE AND customer_code NOT LIKE 'TST-%') AS customers,
+            (SELECT COUNT(*) FROM suppliers WHERE is_active = TRUE AND supplier_code NOT LIKE 'TST-%') AS suppliers,
+            (SELECT COUNT(*) FROM users WHERE is_active = TRUE) AS users
+    """)
+    if not counts_df.empty:
+        c = counts_df.iloc[0]
+    else:
+        c = {'products': 0, 'customers': 0, 'suppliers': 0, 'users': 0}
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-label">📦 Active Products</div>
+            <div class="kpi-value">{int(c['products']):,}</div>
+            <div class="kpi-delta">Live SKUs</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#10b981;">
+            <div class="kpi-label">👥 Active Customers</div>
+            <div class="kpi-value">{int(c['customers']):,}</div>
+            <div class="kpi-delta">Registered accounts</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#f59e0b;">
+            <div class="kpi-label">🏭 Active Suppliers</div>
+            <div class="kpi-value">{int(c['suppliers']):,}</div>
+            <div class="kpi-delta">Vendor accounts</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#8b5cf6;">
+            <div class="kpi-label">👤 System Users</div>
+            <div class="kpi-value">{int(c['users']):,}</div>
+            <div class="kpi-delta">Active logins</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # =========================================================
+    # KPI ROW 2 — Financial period metrics
+    # =========================================================
+    st.markdown("### 💰 Financial Performance")
+
+    fin_df = read_sql("""
+        SELECT
+            COALESCE(SUM(CASE WHEN so.status NOT IN ('Cancelled','Draft') THEN so.total_amount END), 0) AS period_sales,
+            COALESCE(SUM(CASE WHEN so.status NOT IN ('Cancelled','Draft') THEN so.subtotal END), 0) AS period_subtotal,
+            COALESCE(SUM(CASE WHEN so.status NOT IN ('Cancelled','Draft') THEN so.tax_amount END), 0) AS period_tax,
+            COUNT(DISTINCT so.id) FILTER (WHERE so.status NOT IN ('Cancelled','Draft')) AS order_count,
+            COALESCE(SUM(CASE WHEN so.status IN ('Dispatched','Invoiced') THEN so.total_amount END), 0) AS dispatched_value
+        FROM sales_orders so
+        WHERE so.order_date BETWEEN :fd AND :td
+    """, {"fd": from_date, "td": today})
+
+    if not fin_df.empty:
+        f = fin_df.iloc[0]
+    else:
+        f = {'period_sales': 0, 'period_subtotal': 0, 'period_tax': 0,
+             'order_count': 0, 'dispatched_value': 0}
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#0284c7;">
+            <div class="kpi-label">💵 Period Sales</div>
+            <div class="kpi-value">KES {float(f['period_sales']):,.0f}</div>
+            <div class="kpi-delta">{period}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#10b981;">
+            <div class="kpi-label">📋 Orders</div>
+            <div class="kpi-value">{int(f['order_count']):,}</div>
+            <div class="kpi-delta">Confirmed & above</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#f59e0b;">
+            <div class="kpi-label">🏛️ VAT Collected</div>
+            <div class="kpi-value">KES {float(f['period_tax']):,.0f}</div>
+            <div class="kpi-delta">Output tax</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#8b5cf6;">
+            <div class="kpi-label">🚚 Dispatched Value</div>
+            <div class="kpi-value">KES {float(f['dispatched_value']):,.0f}</div>
+            <div class="kpi-delta">In transit & delivered</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # =========================================================
+    # ROW 3 — Sales trend + Stock value
+    # =========================================================
+    st.markdown("### 📈 Trends")
+
+    col_left, col_right = st.columns([3, 2])
+
+    with col_left:
+        # Sales over time
+        trend_df = read_sql("""
+            SELECT 
+                so.order_date AS day,
+                SUM(so.total_amount) AS sales,
+                COUNT(*) AS orders
+            FROM sales_orders so
+            WHERE so.order_date BETWEEN :fd AND :td
+              AND so.status NOT IN ('Cancelled','Draft')
+            GROUP BY so.order_date
+            ORDER BY so.order_date
+        """, {"fd": from_date, "td": today})
+
+        if trend_df.empty:
+            st.info("No sales in this period.")
+        else:
+            import plotly.graph_objects as go
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=trend_df['day'], y=trend_df['sales'],
+                mode='lines+markers',
+                line=dict(color='#0ea5e9', width=3),
+                fill='tozeroy',
+                fillcolor='rgba(14, 165, 233, 0.15)',
+                name='Sales',
+            ))
+            fig.update_layout(
+                title="Sales Over Time",
+                height=320,
+                margin=dict(l=0, r=0, t=40, b=0),
+                showlegend=False,
+                plot_bgcolor='rgba(255,255,255,0.5)',
+                paper_bgcolor='rgba(255,255,255,0.5)',
+                hovermode='x unified',
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_right:
+        # Stock value at cost
+        stock_val = read_sql("""
+            SELECT
+                COALESCE(SUM(p.cost_price * COALESCE((
+                    SELECT SUM(sm.quantity_change)
+                    FROM stock_movements sm
+                    WHERE sm.product_id = p.id AND sm.is_posted = TRUE
+                ), 0)), 0) AS cost_value
+            FROM products p
+            WHERE p.is_active = TRUE
+        """)
+        cost_value = float(stock_val.iloc[0]['cost_value']) if not stock_val.empty else 0
+
+        # AR / AP
+        ar_df = read_sql("""
+            SELECT COALESCE(SUM(balance_due), 0) AS ar
+            FROM invoices
+            WHERE status IN ('Unpaid','Partial')
+        """)
+        ar = float(ar_df.iloc[0]['ar']) if not ar_df.empty else 0
+
+        ap_df = read_sql("""
+            SELECT COALESCE(SUM(total_amount), 0) AS ap
+            FROM purchase_orders
+            WHERE status IN ('Approved','Partially Received','Fully Received')
+        """)
+        ap = float(ap_df.iloc[0]['ap']) if not ap_df.empty else 0
+
+        st.markdown(f"""
+        <div class="kpi-card" style="border-left-color:#16a34a;">
+            <div class="kpi-label">🏭 Total Stock Value (at cost)</div>
+            <div class="kpi-value">KES {cost_value:,.0f}</div>
+            <div class="kpi-delta">Physical inventory</div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#dc2626;">
+            <div class="kpi-label">📥 Accounts Receivable</div>
+            <div class="kpi-value">KES {ar:,.0f}</div>
+            <div class="kpi-delta">Unpaid customer invoices</div>
+        </div>
+        <div class="kpi-card" style="border-left-color:#f59e0b;">
+            <div class="kpi-label">📤 Accounts Payable</div>
+            <div class="kpi-value">KES {ap:,.0f}</div>
+            <div class="kpi-delta">Open supplier POs</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # =========================================================
+    # ROW 4 — Top performers
+    # =========================================================
+    st.markdown("### 🏆 Top Performers")
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        st.markdown("#### 🥇 Top Products by Revenue")
+        top_prods = read_sql("""
+            SELECT 
+                p.product_name,
+                SUM(soi.quantity_ordered) AS qty_sold,
+                SUM(soi.line_total) AS revenue
+            FROM sales_order_items soi
+            JOIN sales_orders so ON soi.order_id = so.id
+            JOIN products p ON soi.product_id = p.id
+            WHERE so.order_date BETWEEN :fd AND :td
+              AND so.status NOT IN ('Cancelled','Draft')
+            GROUP BY p.product_name
+            ORDER BY revenue DESC
+            LIMIT 10
+        """, {"fd": from_date, "td": today})
+
+        if top_prods.empty:
+            st.caption("No product sales in this period.")
+        else:
+            import plotly.express as px
+            fig = px.bar(
+                top_prods, x='revenue', y='product_name',
+                orientation='h',
+                color='revenue',
+                color_continuous_scale='Blues',
+                labels={'revenue': 'Revenue (KES)', 'product_name': ''},
+            )
+            fig.update_layout(
+                height=350,
+                margin=dict(l=0, r=0, t=20, b=0),
+                showlegend=False,
+                yaxis={'categoryorder': 'total ascending'},
+                coloraxis_showscale=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_b:
+        st.markdown("#### 🥇 Top Customers by Spend")
+        top_custs = read_sql("""
+            SELECT 
+                c.customer_name,
+                COUNT(DISTINCT so.id) AS order_count,
+                SUM(so.total_amount) AS total_spend
+            FROM sales_orders so
+            JOIN customers c ON so.customer_id = c.id
+            WHERE so.order_date BETWEEN :fd AND :td
+              AND so.status NOT IN ('Cancelled','Draft')
+            GROUP BY c.customer_name
+            ORDER BY total_spend DESC
+            LIMIT 10
+        """, {"fd": from_date, "td": today})
+
+        if top_custs.empty:
+            st.caption("No customer sales in this period.")
+        else:
+            import plotly.express as px
+            fig = px.bar(
+                top_custs, x='total_spend', y='customer_name',
+                orientation='h',
+                color='total_spend',
+                color_continuous_scale='Greens',
+                labels={'total_spend': 'Spend (KES)', 'customer_name': ''},
+            )
+            fig.update_layout(
+                height=350,
+                margin=dict(l=0, r=0, t=20, b=0),
+                showlegend=False,
+                yaxis={'categoryorder': 'total ascending'},
+                coloraxis_showscale=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # =========================================================
+    # ROW 5 — Status distribution + Alerts
+    # =========================================================
+    st.markdown("### 🔔 Alerts & Status")
+
+    col_x, col_y = st.columns([2, 3])
+
+    with col_x:
+        st.markdown("#### 📋 Order Status Distribution")
+        status_df = read_sql("""
+            SELECT status, COUNT(*) AS cnt
+            FROM sales_orders
+            WHERE order_date BETWEEN :fd AND :td
+            GROUP BY status
+            ORDER BY cnt DESC
+        """, {"fd": from_date, "td": today})
+
+        if status_df.empty:
+            st.caption("No orders in this period.")
+        else:
+            import plotly.graph_objects as go
+            fig = go.Figure(data=[go.Pie(
+                labels=status_df['status'],
+                values=status_df['cnt'],
+                hole=0.5,
+                marker=dict(colors=['#0ea5e9','#10b981','#f59e0b',
+                                    '#8b5cf6','#ef4444'][:len(status_df)]),
+            )])
+            fig.update_layout(
+                height=300,
+                margin=dict(l=0, r=0, t=20, b=0),
+                showlegend=True,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_y:
+        st.markdown("#### ⚠️ Action Items")
+
+        # Low stock
+        low_stock = read_sql("""
+            SELECT p.product_code, p.product_name,
+                   COALESCE(SUM(sm.quantity_change), 0) AS stock,
+                   p.reorder_level
+            FROM products p
+            LEFT JOIN stock_movements sm 
+                ON sm.product_id = p.id AND sm.is_posted = TRUE
+            WHERE p.is_active = TRUE
+              AND p.reorder_level > 0
+            GROUP BY p.id, p.product_code, p.product_name, p.reorder_level
+            HAVING COALESCE(SUM(sm.quantity_change), 0) < p.reorder_level
+            ORDER BY (COALESCE(SUM(sm.quantity_change), 0) - p.reorder_level) ASC
+            LIMIT 5
+        """)
+
+        if not low_stock.empty:
+            for _, r in low_stock.iterrows():
+                st.markdown(f"""
+                <div class="alert-card">
+                    <strong>⚠️ Low Stock:</strong> {r['product_name']}
+                    <br><small>Current: {int(r['stock'])} / Reorder at: {int(r['reorder_level'])}</small>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.success("✅ All products above reorder level")
+
+        # Overdue invoices
+        overdue = read_sql("""
+            SELECT invoice_number, due_date, balance_due, customer_id
+            FROM invoices
+            WHERE status IN ('Unpaid','Partial')
+              AND due_date < CURRENT_DATE
+            ORDER BY due_date ASC
+            LIMIT 5
+        """)
+        if not overdue.empty:
+            st.markdown(f"""
+            <div class="alert-card alert-danger">
+                <strong>💸 {len(overdue)} overdue invoice(s)</strong>
+                <br><small>Oldest due: {overdue.iloc[0]['due_date']}</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Batches expiring soon
+        expiring = read_sql("""
+            SELECT COUNT(*) AS cnt
+            FROM product_batches
+            WHERE quality_status = 'Released'
+              AND expiry_date IS NOT NULL
+              AND expiry_date <= CURRENT_DATE + INTERVAL '90 days'
+              AND expiry_date >= CURRENT_DATE
+        """)
+        if not expiring.empty and int(expiring.iloc[0]['cnt'] or 0) > 0:
+            st.markdown(f"""
+            <div class="alert-card">
+                <strong>⏰ {int(expiring.iloc[0]['cnt'])} batch(es) expiring in 90 days</strong>
+                <br><small>Review Quality Control → Expiry Monitor</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Pending POs
+        pending_pos = read_sql("""
+            SELECT COUNT(*) AS cnt
+            FROM purchase_orders
+            WHERE status IN ('Approved','Partially Received')
+        """)
+        if not pending_pos.empty and int(pending_pos.iloc[0]['cnt'] or 0) > 0:
+            st.markdown(f"""
+            <div class="alert-card">
+                <strong>📦 {int(pending_pos.iloc[0]['cnt'])} POs awaiting delivery</strong>
+                <br><small>Review Procurement → Purchase Orders</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # =========================================================
+    # ROW 6 — Activity feed
+    # =========================================================
+    st.markdown("### 📝 Recent Activity")
+
+    activity = read_sql("""
+        SELECT timestamp, username, action, table_name, record_id
+        FROM audit_logs
+        ORDER BY timestamp DESC
+        LIMIT 15
+    """)
+
+    if activity.empty:
+        st.caption("No activity yet.")
+    else:
+        display = activity.copy()
+        display['timestamp'] = display['timestamp'].astype(str).str[:19]
+        display = display[['timestamp', 'username', 'action', 'table_name', 'record_id']]
+        display.columns = ['Time', 'User', 'Action', 'Table', 'Record ID']
+        st.dataframe(display, use_container_width=True, hide_index=True, height=400)
+
+    # =========================================================
+    # FOOTER
+    # =========================================================
+    st.markdown("---")
+    st.caption(
+        f"💧 Amigoz ERP · Period: {from_date} → {today} · "
+        f"Warehouse: {warehouse_filter} · "
+        f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
 # =========================================================
 # IMPORT PAGE MODULES
 # =========================================================
