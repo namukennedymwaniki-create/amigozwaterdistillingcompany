@@ -572,7 +572,10 @@ def get_reorder_alerts(warehouse_id=None):
     """
     Products where total stock < reorder_level.
     Uses the ledger, summed across warehouses (or one).
+    Boolean-safe for PostgreSQL (uses TRUE, not 1).
     """
+    import pandas as pd
+
     query = """
         SELECT 
             p.id,
@@ -585,25 +588,32 @@ def get_reorder_alerts(warehouse_id=None):
             COALESCE((
                 SELECT SUM(sm.quantity_change)
                 FROM stock_movements sm
-                WHERE sm.product_id = p.id AND sm.is_posted = 1
+                WHERE sm.product_id = p.id AND sm.is_posted = TRUE
     """
     if warehouse_id is not None:
         query += " AND sm.warehouse_id = :wid"
     query += """
             ), 0) as current_stock
         FROM products p
-        WHERE p.is_active = 1 AND p.reorder_level > 0
+        WHERE p.is_active = TRUE AND p.reorder_level > 0
     """
     params = {}
     if warehouse_id is not None:
         params["wid"] = warehouse_id
-    
+
     query += " ORDER BY (current_stock - p.reorder_level) ASC"
-    
+
     df = read_sql(query, params if params else None)
+
+    # Guarantee a DataFrame is returned, never None
+    if not isinstance(df, pd.DataFrame):
+        return pd.DataFrame()
+
     if df.empty:
         return df
-    return df[df['current_stock'] < df['reorder_level']]
+
+    # Filter to only items below reorder level
+    return df[df['current_stock'] < df['reorder_level']].reset_index(drop=True)
 
 
 # =========================================================
