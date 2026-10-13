@@ -206,8 +206,8 @@ def get_warehouse_balances(warehouse_id=None):
         LEFT JOIN stock_movements sm 
             ON sm.product_id = p.id 
             AND sm.warehouse_id = w.id
-            AND sm.is_posted = 1
-        WHERE p.is_active = 1
+            AND sm.is_posted = TRUE
+        WHERE p.is_active = TRUE
     """
     params = {}
     
