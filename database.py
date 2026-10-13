@@ -70,34 +70,48 @@ def get_db_connection():
 
 def read_sql(query, params=None):
     """
-    Helper: Run a SELECT and return a DataFrame.
-    Works with SQLAlchemy engine + psycopg (v3).
-    Accepts either a plain string or a SQLAlchemy text() object.
-    Named parameters (`:id`) are supported.
+    Run a SELECT and return a DataFrame.
+    - Accepts either a plain string or a SQLAlchemy text() object.
+    - Named parameters (`:id`) are supported.
+    - ALWAYS returns a pd.DataFrame — never None.
     """
+    import pandas as pd
     from sqlalchemy import text as sql_text
 
-    engine = _get_engine()
-    if engine is None:
+    try:
+        engine = _get_engine()
+        if engine is None:
+            return pd.DataFrame()
+    except Exception as e:
+        print(f"read_sql: engine error: {e}")
         return pd.DataFrame()
 
-    # Wrap in text() if it's a plain string so `:name` params work
-    stmt = sql_text(query) if isinstance(query, str) else query
+    try:
+        stmt = sql_text(query) if isinstance(query, str) else query
+    except Exception as e:
+        print(f"read_sql: text() wrap error: {e}")
+        return pd.DataFrame()
 
     try:
         if params:
-            return pd.read_sql(stmt, engine, params=params)
-        return pd.read_sql(stmt, engine)
+            df = pd.read_sql(stmt, engine, params=params)
+        else:
+            df = pd.read_sql(stmt, engine)
+        return df if df is not None else pd.DataFrame()
     except Exception as e:
-        print(f"read_sql error: {e}")
-        try:
-            with engine.connect() as conn:
-                if params:
-                    return pd.read_sql(stmt, conn, params=params)
-                return pd.read_sql(stmt, conn)
-        except Exception as e2:
-            print(f"read_sql fallback error: {e2}")
-            return pd.DataFrame()
+        print(f"read_sql error (engine): {e}")
+
+    try:
+        with engine.connect() as conn:
+            if params:
+                df = pd.read_sql(stmt, conn, params=params)
+            else:
+                df = pd.read_sql(stmt, conn)
+            return df if df is not None else pd.DataFrame()
+    except Exception as e2:
+        print(f"read_sql fallback error (conn): {e2}")
+
+    return pd.DataFrame()
 
 
 def get_is_cloud():
