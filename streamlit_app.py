@@ -433,7 +433,7 @@ def dashboard_page():
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
             <div>
                 <h2 style="color: #0c4a6e; margin: 0; font-weight: 700; font-size: 24px;">
-                    👋 Welcome back, {user}
+                    Welcome to Amigoz Water Distilling Company ERP
                 </h2>
                 <p style="color: #0369a1; margin: 6px 0 0; font-size: 15px;">
                     {today_str} · {role}
