@@ -62,6 +62,8 @@ def generate_order_number():
 
 
 def generate_reservation_number():
+    print("🔴 NEW generate_reservation_number called — using MAX query")
+    conn = get_db_connection()
     """
     RSV-{YYYY}-{SEQ} — MAX-based, collision-safe.
     """
