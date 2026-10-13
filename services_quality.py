@@ -322,57 +322,69 @@ def get_available_stock(product_id, warehouse_id=None, include_unbatched=True):
     Calculate ONLY sellable stock:
     - Non-batch-tracked products: all stock
     - Batch-tracked products: only Released + non-expired batches
+      UNLESS include_unbatched=True, in which case unbatched movements
+      (batch_id IS NULL) are also counted (useful for opening stock).
     """
+    from datetime import date
+    from database import get_db_connection
+    from sqlalchemy import text
+
     conn = get_db_connection()
     if not conn:
         return 0
-    
+
     try:
-        # Check if product is batch-tracked
         product = conn.execute(text(
             "SELECT is_batch_tracked FROM products WHERE id = :pid"
-        ), {"pid": product_id}).fetchone()
-        
+        ), {"pid": int(product_id)}).fetchone()
+
         if not product:
-            conn.close()
             return 0
-        
+
         is_batch_tracked = product[0]
-        
-        # If NOT batch-tracked, return total stock
+
+        # Non-batch-tracked products: total stock
         if not is_batch_tracked:
-            conn.close()
-            return get_stock_balance(product_id, warehouse_id)
-        
-        # Batch-tracked: sum only Released + non-expired
+            query = """
+                SELECT COALESCE(SUM(quantity_change), 0)
+                FROM stock_movements
+                WHERE product_id = :pid AND is_posted = TRUE
+            """
+            params = {"pid": int(product_id)}
+            if warehouse_id is not None:
+                query += " AND warehouse_id = :wid"
+                params["wid"] = int(warehouse_id)
+            result = conn.execute(text(query), params).scalar()
+            return float(result or 0)
+
+        # Batch-tracked products: sum Released + non-expired batches
         today = date.today()
-        
         query = """
-            SELECT COALESCE(SUM(sm.quantity_change), 0) as balance
+            SELECT COALESCE(SUM(sm.quantity_change), 0)
             FROM stock_movements sm
-            JOIN product_batches pb ON sm.batch_id = pb.id
+            LEFT JOIN product_batches pb ON sm.batch_id = pb.id
             WHERE sm.product_id = :pid
-              AND sm.is_posted = 1
-              AND pb.quality_status = 'Released'
-              AND (pb.expiry_date IS NULL OR pb.expiry_date >= :today)
+              AND sm.is_posted = TRUE
+              AND (
+                  sm.batch_id IS NULL  -- unbatched movements (opening/legacy)
+                  OR (
+                      pb.quality_status = 'Released'
+                      AND (pb.expiry_date IS NULL OR pb.expiry_date >= :today)
+                  )
+              )
         """
-        params = {"pid": product_id, "today": today}
-        
+        params = {"pid": int(product_id), "today": today}
         if warehouse_id is not None:
             query += " AND sm.warehouse_id = :wid"
-            params["wid"] = warehouse_id
-        
+            params["wid"] = int(warehouse_id)
         result = conn.execute(text(query), params).scalar()
-        conn.close()
         return float(result or 0)
-    
+
     except Exception as e:
-        try:
-            conn.close()
-        except:
-            pass
         print(f"Available stock error: {e}")
         return 0
+    finally:
+        conn.close()
 
 
 # =========================================================
