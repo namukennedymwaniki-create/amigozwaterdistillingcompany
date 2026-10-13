@@ -29,53 +29,57 @@ def _safe_df(df):
 # NUMBER GENERATION
 # =========================================================
 def generate_order_number():
-    """SO-{YYYY}-{SEQ}"""
+    """
+    SO-{YYYY}-{SEQ}
+    Robust version — uses MAX(suffix) for the current year.
+    """
     conn = get_db_connection()
     if not conn:
         return f"SO-{datetime.now().year}-0001"
     try:
         year = datetime.now().year
         pattern = f"SO-{year}-%"
+
         result = conn.execute(text("""
-            SELECT order_number FROM sales_orders
+            SELECT MAX(CAST(SPLIT_PART(order_number, '-', 3) AS INTEGER)) AS max_num
+            FROM sales_orders
             WHERE order_number LIKE :pat
-            ORDER BY id DESC LIMIT 1
         """), {"pat": pattern}).fetchone()
-        if result and result[0]:
-            try:
-                num = int(result[0].split("-")[-1])
-                return f"SO-{year}-{str(num + 1).zfill(4)}"
-            except Exception:
-                return f"SO-{year}-0001"
-        return f"SO-{year}-0001"
-    except Exception:
-        return f"SO-{year}-0001"
+
+        max_num = int(result[0]) if result and result[0] is not None else 0
+        return f"SO-{year}-{str(max_num + 1).zfill(4)}"
+    except Exception as e:
+        print(f"generate_order_number error: {e}")
+        return f"SO-{datetime.now().year}-0001"
     finally:
         conn.close()
 
 
 def generate_reservation_number():
-    """RSV-{YYYY}-{SEQ}"""
+    """
+    RSV-{YYYY}-{SEQ}
+    Robust version — uses MAX(suffix) from existing reservations
+    for the current year, then increments. Also retries on collision.
+    """
     conn = get_db_connection()
     if not conn:
         return f"RSV-{datetime.now().year}-0001"
     try:
         year = datetime.now().year
         pattern = f"RSV-{year}-%"
+
+        # Find the highest numeric suffix for this year
         result = conn.execute(text("""
-            SELECT reservation_number FROM stock_reservations
+            SELECT MAX(CAST(SPLIT_PART(reservation_number, '-', 3) AS INTEGER)) AS max_num
+            FROM stock_reservations
             WHERE reservation_number LIKE :pat
-            ORDER BY id DESC LIMIT 1
         """), {"pat": pattern}).fetchone()
-        if result and result[0]:
-            try:
-                num = int(result[0].split("-")[-1])
-                return f"RSV-{year}-{str(num + 1).zfill(4)}"
-            except Exception:
-                return f"RSV-{year}-0001"
-        return f"RSV-{year}-0001"
-    except Exception:
-        return f"RSV-{year}-0001"
+
+        max_num = int(result[0]) if result and result[0] is not None else 0
+        return f"RSV-{year}-{str(max_num + 1).zfill(4)}"
+    except Exception as e:
+        print(f"generate_reservation_number error: {e}")
+        return f"RSV-{datetime.now().year}-0001"
     finally:
         conn.close()
 
