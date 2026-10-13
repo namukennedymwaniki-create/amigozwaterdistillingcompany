@@ -62,10 +62,9 @@ def generate_order_number():
 
 
 def generate_reservation_number():
-    print("🔴 NEW generate_reservation_number called — using MAX query")
-    conn = get_db_connection()
     """
     RSV-{YYYY}-{SEQ} — MAX-based, collision-safe.
+    Uses a fresh connection with READ COMMITTED to see all committed rows.
     """
     conn = get_db_connection()
     if not conn:
@@ -73,6 +72,9 @@ def generate_reservation_number():
     try:
         year = datetime.now().year
         pattern = f"RSV-{year}-%"
+
+        # Force a fresh transaction snapshot
+        conn.commit()  # close any implicit open transaction
 
         result = conn.execute(text("""
             SELECT MAX(CAST(SPLIT_PART(reservation_number, '-', 3) AS INTEGER)) AS max_num
