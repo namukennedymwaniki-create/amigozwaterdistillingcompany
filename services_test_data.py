@@ -17,7 +17,10 @@
 #   - Payments:     payment_number starts with 'TPAY-'
 #   - Notes:        '[TEST]' marker in notes field
 #
-# IMPORTANT: `stock_movements` uses `reason` (not `notes`) for free text.
+# IMPORTANT:
+#   - `stock_movements` uses `reason` (not `notes`) for free text.
+#   - All BOOLEAN columns take Python True/False via bind params.
+#   - All `except` blocks RAISE so errors surface in the UI.
 # =========================================================
 
 import streamlit as st
@@ -89,7 +92,6 @@ def _rand_email(name):
 def preview_plan(n_users=5, n_customers=10, n_suppliers=5, n_products=7,
                  n_pos=4, n_grns=4, n_sos=10, n_dispatches=8,
                  n_deliveries=8, n_container_issues=5):
-    """Returns a dict summarising what would be created"""
     return {
         "users": n_users,
         "customers": n_customers,
@@ -173,7 +175,7 @@ def generate_customers(count=10):
                 ) VALUES (
                     :code, :name, :ctype,
                     :contact, :phone, :email, :addr, :town,
-                    :credit, :terms, 1, :notes,
+                    :credit, :terms, :active, :notes,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 ) RETURNING id
             """), {
@@ -186,6 +188,7 @@ def generate_customers(count=10):
                                         "Kisumu", "Eldoret", "Thika"]),
                 "credit": credit,
                 "terms": random.choice(["Cash", "30 days", "60 days"]),
+                "active": True,
                 "notes": "[TEST] Auto-generated test customer",
             })
             cid = result.fetchone()[0]
@@ -193,7 +196,7 @@ def generate_customers(count=10):
             created.append(cid)
         except Exception as e:
             conn.rollback()
-            print(f"Customer {i} error: {e}")
+            raise Exception(f"Customer {i} insert failed: {type(e).__name__}: {e}")
         finally:
             conn.close()
 
@@ -220,7 +223,7 @@ def generate_suppliers(count=5):
                 ) VALUES (
                     :code, :name, :contact,
                     :phone, :email, :addr, :town, :terms,
-                    1, :notes, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    :active, :notes, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 ) RETURNING id
             """), {
                 "code": code, "name": name,
@@ -230,6 +233,7 @@ def generate_suppliers(count=5):
                 "addr": f"P.O. Box {random.randint(100, 9999)}",
                 "town": random.choice(["Nairobi", "Thika", "Mombasa"]),
                 "terms": random.choice(["30 days", "60 days"]),
+                "active": True,
                 "notes": "[TEST] Auto-generated test supplier",
             })
             sid = result.fetchone()[0]
@@ -237,7 +241,7 @@ def generate_suppliers(count=5):
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"Supplier gen error: {e}")
+        raise Exception(f"Supplier insert failed: {type(e).__name__}: {e}")
     finally:
         conn.close()
     return created
@@ -276,17 +280,18 @@ def generate_products():
                     created_at, updated_at
                 ) VALUES (
                     :code, :name, :cat, :size, :unit,
-                    1, :cost, :price,
+                    :pack, :cost, :price,
                     :reorder, :reorder_qty,
-                    :bt, 1, :desc,
+                    :bt, :active, :desc,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 ) RETURNING id
             """), {
                 "code": code, "name": f"[TEST] {name}", "cat": cat_map.get(cat),
                 "size": size, "unit": unit,
-                "cost": cost, "price": price,
+                "pack": 1, "cost": cost, "price": price,
                 "reorder": reorder, "reorder_qty": reorder * 3,
                 "bt": batch_tracked,
+                "active": True,
                 "desc": "[TEST] Auto-generated test product",
             })
             pid = result.fetchone()[0]
@@ -294,7 +299,7 @@ def generate_products():
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"Product gen error: {e}")
+        raise Exception(f"Product insert failed: {type(e).__name__}: {e}")
     finally:
         conn.close()
     return created
@@ -352,7 +357,7 @@ def generate_sales_orders(count=10):
             FROM products WHERE product_code LIKE 'TPRD-%'
         """)).fetchall()
         warehouses = conn.execute(text(
-            "SELECT id, code FROM warehouses WHERE is_active = 1"
+            "SELECT id, code FROM warehouses WHERE is_active = TRUE"
         )).fetchall()
 
         if not (customers and products and warehouses):
@@ -457,7 +462,7 @@ def generate_purchase_orders(count=4):
             SELECT id, cost_price FROM products WHERE product_code LIKE 'TPRD-%'
         """)).fetchall()
         warehouses = conn.execute(text(
-            "SELECT id, code FROM warehouses WHERE is_active = 1"
+            "SELECT id, code FROM warehouses WHERE is_active = TRUE"
         )).fetchall()
 
         if not (suppliers and products and warehouses):
@@ -590,7 +595,7 @@ def generate_containers(count=5):
             SELECT id FROM customers WHERE customer_code LIKE 'TST-CUST-%'
         """)).fetchall()
         containers = conn.execute(text(
-            "SELECT id, deposit_amount FROM containers WHERE is_active = 1"
+            "SELECT id, deposit_amount FROM containers WHERE is_active = TRUE"
         )).fetchall()
 
         if not (customers and containers):
@@ -664,8 +669,10 @@ def generate_containers(count=5):
 def generate_all(progress_callback=None, **kwargs):
     """
     Run the full test data generation pipeline.
-    Returns a summary dict.
+    Returns a summary dict with per-step counts AND errors.
     """
+    import traceback
+
     results = {
         "users": 0,
         "customers": 0,
@@ -676,65 +683,93 @@ def generate_all(progress_callback=None, **kwargs):
         "sales_orders": {},
         "payments": 0,
         "containers": {},
+        "errors": [],
     }
 
     def progress(msg):
         if progress_callback:
             progress_callback(msg)
 
-    try:
-        progress("👤 Creating test users...")
-        results["users"] = len(generate_users(kwargs.get("n_users", 5)))
-    except Exception as e:
-        print(f"users: {e}")
+    def step(name, fn, *args, **kw):
+        try:
+            progress(f"▶ {name}...")
+            out = fn(*args, **kw)
+            progress(f"✅ {name} done → {out}")
+            return out
+        except Exception as e:
+            err = f"{name}: {type(e).__name__}: {e}"
+            results["errors"].append(err)
+            results["errors"].append(traceback.format_exc())
+            progress(f"❌ {name} FAILED — see errors below")
+            return None
 
+    # --- Reference data pre-check ---
     try:
-        progress("👥 Creating test customers...")
-        results["customers"] = len(generate_customers(kwargs.get("n_customers", 10)))
+        wh_count = len(read_sql("SELECT id FROM warehouses WHERE is_active = TRUE"))
+        cat_count = len(read_sql("SELECT id FROM product_categories WHERE is_active = TRUE"))
+        cont_count = len(read_sql("SELECT id FROM containers WHERE is_active = TRUE"))
+        role_count = len(read_sql("SELECT id FROM roles WHERE is_active = TRUE"))
+        progress(f"📋 Ref data: {wh_count} warehouses, {cat_count} cats, "
+                 f"{cont_count} containers, {role_count} roles")
+        if wh_count == 0:
+            results["errors"].append("⚠️ No warehouses — opening stock / POs / sales will skip")
+        if cat_count == 0:
+            results["errors"].append("⚠️ No product_categories — products insert may fail")
+        if cont_count == 0:
+            results["errors"].append("⚠️ No containers — container tests will skip")
+        if role_count == 0:
+            results["errors"].append("⚠️ No roles — user creation may fail")
     except Exception as e:
-        print(f"customers: {e}")
+        results["errors"].append(f"Ref data check failed: {e}")
 
-    try:
-        progress("🏭 Creating test suppliers...")
-        results["suppliers"] = len(generate_suppliers(kwargs.get("n_suppliers", 5)))
-    except Exception as e:
-        print(f"suppliers: {e}")
+    # --- USERS ---
+    users = step("Create users", generate_users, kwargs.get("n_users", 5))
+    results["users"] = len(users) if users else 0
 
-    try:
-        progress("📦 Creating test products...")
-        results["products"] = len(generate_products())
-    except Exception as e:
-        print(f"products: {e}")
+    # --- CUSTOMERS ---
+    customers = step("Create customers", generate_customers, kwargs.get("n_customers", 10))
+    results["customers"] = len(customers) if customers else 0
 
-    try:
-        progress("📥 Posting opening stock...")
-        results["opening_stock"] = generate_opening_stock()
-    except Exception as e:
-        print(f"opening_stock: {e}")
+    # --- SUPPLIERS ---
+    suppliers = step("Create suppliers", generate_suppliers, kwargs.get("n_suppliers", 5))
+    results["suppliers"] = len(suppliers) if suppliers else 0
 
-    try:
-        progress("🛒 Creating purchase orders and receiving goods...")
-        results["purchase_orders"] = generate_purchase_orders(kwargs.get("n_pos", 4))
-    except Exception as e:
-        print(f"purchase_orders: {e}")
+    # --- PRODUCTS ---
+    products = step("Create products", generate_products)
+    results["products"] = len(products) if products else 0
 
-    try:
-        progress("💰 Creating sales orders, dispatches, invoices...")
-        results["sales_orders"] = generate_sales_orders(kwargs.get("n_sos", 10))
-    except Exception as e:
-        print(f"sales_orders: {e}")
+    # --- OPENING STOCK ---
+    if products:
+        results["opening_stock"] = step("Post opening stock", generate_opening_stock) or 0
+    else:
+        results["errors"].append("opening_stock skipped — no products created")
 
-    try:
-        progress("💳 Recording payments...")
-        results["payments"] = generate_payments(kwargs.get("n_sos", 10))
-    except Exception as e:
-        print(f"payments: {e}")
+    # --- PURCHASE ORDERS / GRN ---
+    if suppliers and products:
+        results["purchase_orders"] = step("Purchase orders + GRN",
+                                          generate_purchase_orders,
+                                          kwargs.get("n_pos", 4)) or {}
+    else:
+        results["errors"].append("purchase_orders skipped — need suppliers and products")
 
-    try:
-        progress("🍶 Creating container issues and returns...")
-        results["containers"] = generate_containers(kwargs.get("n_container_issues", 5))
-    except Exception as e:
-        print(f"containers: {e}")
+    # --- SALES ORDERS ---
+    if customers and products:
+        results["sales_orders"] = step("Sales orders + dispatch + invoice",
+                                       generate_sales_orders,
+                                       kwargs.get("n_sos", 10)) or {}
+    else:
+        results["errors"].append("sales_orders skipped — need customers and products")
+
+    # --- PAYMENTS ---
+    results["payments"] = step("Payments", generate_payments,
+                               kwargs.get("n_sos", 10)) or 0
+
+    # --- CONTAINERS ---
+    if customers:
+        results["containers"] = step("Containers", generate_containers,
+                                     kwargs.get("n_container_issues", 5)) or {}
+    else:
+        results["errors"].append("containers skipped — no customers")
 
     progress("✅ Test data generation complete")
     return results
@@ -831,9 +866,11 @@ def cleanup_test_data():
              "user_id IN (SELECT id FROM users WHERE username LIKE 'test_%')"),
             ("users", "username LIKE 'test_%'"),
 
-            # Audit logs related to test data
+            # Audit logs — cast JSONB to text
             ("audit_logs",
-             "new_values LIKE '%[TEST]%' OR username LIKE 'test_%'"),
+             "new_values::text LIKE '%[TEST]%' "
+             "OR old_values::text LIKE '%[TEST]%' "
+             "OR username LIKE 'test_%'"),
         ]
 
         for table, condition in deletes:
@@ -841,7 +878,7 @@ def cleanup_test_data():
                 result = conn.execute(
                     text(f"DELETE FROM {table} WHERE {condition}")
                 )
-                deleted[table] = result.rowcount
+                deleted[table] = int(result.rowcount or 0)
             except Exception as e:
                 deleted[table] = f"error: {e}"
                 conn.rollback()
@@ -858,7 +895,7 @@ def cleanup_test_data():
 
 def count_test_data():
     """Preview what would be deleted.
-    
+
     NOTE: `stock_movements` uses `reason` (not `notes`).
     """
     queries = {
@@ -877,12 +914,16 @@ def count_test_data():
             "SELECT COUNT(*) FROM container_issues WHERE issue_number LIKE 'TCIS-%' OR notes LIKE '%[TEST]%'",
         "test container returns":
             "SELECT COUNT(*) FROM container_returns WHERE return_number LIKE 'TCRT-%' OR notes LIKE '%[TEST]%'",
-        # FIXED: stock_movements uses `reason`, not `notes`
         "test stock moves":
             "SELECT COUNT(*) FROM stock_movements "
             "WHERE reason LIKE '%[TEST]%' "
             "   OR reference_number LIKE 'TEST-%' "
             "   OR product_id IN (SELECT id FROM products WHERE product_code LIKE 'TPRD-%')",
+        "test audit logs":
+            "SELECT COUNT(*) FROM audit_logs "
+            "WHERE new_values::text LIKE '%[TEST]%' "
+            "   OR old_values::text LIKE '%[TEST]%' "
+            "   OR username LIKE 'test_%'",
     }
     conn = get_db_connection()
     if not conn:
