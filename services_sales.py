@@ -2,7 +2,14 @@
 # services_sales.py
 # Sales Order Service Layer — Boolean-safe & DataFrame-safe
 # =========================================================
+# Notes:
+#   - Number generators use MAX(suffix) → no collisions.
+#   - Reservation creation retries on duplicate key.
+#   - All read_sql results coerced to DataFrame (never None).
+#   - Booleans passed as Python True/False.
+# =========================================================
 
+import time
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -26,12 +33,11 @@ def _safe_df(df):
 
 
 # =========================================================
-# NUMBER GENERATION
+# NUMBER GENERATION — MAX-based, collision-safe
 # =========================================================
 def generate_order_number():
     """
-    SO-{YYYY}-{SEQ}
-    Robust version — uses MAX(suffix) for the current year.
+    SO-{YYYY}-{SEQ} — MAX-based, collision-safe.
     """
     conn = get_db_connection()
     if not conn:
@@ -57,9 +63,7 @@ def generate_order_number():
 
 def generate_reservation_number():
     """
-    RSV-{YYYY}-{SEQ}
-    Robust version — uses MAX(suffix) from existing reservations
-    for the current year, then increments. Also retries on collision.
+    RSV-{YYYY}-{SEQ} — MAX-based, collision-safe.
     """
     conn = get_db_connection()
     if not conn:
@@ -68,7 +72,6 @@ def generate_reservation_number():
         year = datetime.now().year
         pattern = f"RSV-{year}-%"
 
-        # Find the highest numeric suffix for this year
         result = conn.execute(text("""
             SELECT MAX(CAST(SPLIT_PART(reservation_number, '-', 3) AS INTEGER)) AS max_num
             FROM stock_reservations
@@ -132,7 +135,7 @@ def create_sales_order(customer_id, order_date, delivery_date=None,
             "sub": subtotal,
             "tax": tax_amount,
             "total": total,
-            "vat": vat_enabled,          # Python bool
+            "vat": vat_enabled,
             "rate": float(tax_rate) if vat_enabled else 0.0,
             "notes": notes,
             "uid": st.session_state.get('user_id'),
@@ -150,7 +153,7 @@ def create_sales_order(customer_id, order_date, delivery_date=None,
                     :oid, :pid, :qty, :price, :total, CURRENT_TIMESTAMP
                 )
             """), {
-                "oid": order_id,
+                "oid": int(order_id),
                 "pid": int(it['product_id']),
                 "qty": float(it['quantity']),
                 "price": float(it['unit_price']),
@@ -244,14 +247,14 @@ def get_order_items(order_id):
 
 
 # =========================================================
-# CONFIRM
+# CONFIRM — creates reservations with retry-on-collision
 # =========================================================
 def confirm_order(order_id, allow_credit_override=False):
     """
     Confirm a draft order:
     1. Validate sellable stock for each item
     2. Check customer credit
-    3. Create stock reservations
+    3. Create stock reservations (with retry on duplicate)
     4. Set status to 'Confirmed'
     """
     conn = get_db_connection()
@@ -288,33 +291,49 @@ def confirm_order(order_id, allow_credit_override=False):
         if not ok and not allow_credit_override:
             return False, msg
 
-        # Create reservations
-        rsv_number = generate_reservation_number()
+        # Create reservations with retry on collision
+        max_retries = 5
+        rsv_number = None
+        last_error = None
 
-        for _, it in items.iterrows():
-            conn.execute(text("""
-                INSERT INTO stock_reservations (
-                    reservation_number, product_id, quantity,
-                    reference_id, reference_table, reference_number,
-                    reserved_for, status, expires_at, notes,
-                    created_by, created_at
-                ) VALUES (
-                    :rnum, :pid, :qty,
-                    :rid, 'sales_orders', :onum,
-                    :rfor, 'Active', :exp, :notes,
-                    :uid, CURRENT_TIMESTAMP
-                )
-            """), {
-                "rnum": rsv_number,
-                "pid": int(it['product_id']),
-                "qty": float(it['quantity_ordered']),
-                "rid": int(order_id),
-                "onum": order['order_number'],
-                "rfor": order['customer_name'],
-                "exp": datetime.now() + timedelta(days=7),
-                "notes": f"Auto-reserve for order {order['order_number']}",
-                "uid": st.session_state.get('user_id'),
-            })
+        for attempt in range(max_retries):
+            rsv_number = generate_reservation_number()
+            try:
+                for _, it in items.iterrows():
+                    conn.execute(text("""
+                        INSERT INTO stock_reservations (
+                            reservation_number, product_id, quantity,
+                            reference_id, reference_table, reference_number,
+                            reserved_for, status, expires_at, notes,
+                            created_by, created_at
+                        ) VALUES (
+                            :rnum, :pid, :qty,
+                            :rid, 'sales_orders', :onum,
+                            :rfor, 'Active', :exp, :notes,
+                            :uid, CURRENT_TIMESTAMP
+                        )
+                    """), {
+                        "rnum": rsv_number,
+                        "pid": int(it['product_id']),
+                        "qty": float(it['quantity_ordered']),
+                        "rid": int(order_id),
+                        "onum": order['order_number'],
+                        "rfor": order['customer_name'],
+                        "exp": datetime.now() + timedelta(days=7),
+                        "notes": f"Auto-reserve for order {order['order_number']}",
+                        "uid": st.session_state.get('user_id'),
+                    })
+                break  # success
+            except Exception as e:
+                conn.rollback()
+                last_error = str(e)
+                if "duplicate key" in str(e).lower() and attempt < max_retries - 1:
+                    time.sleep(0.05)
+                    continue
+                return False, f"Error creating reservations: {e}"
+
+        if rsv_number is None:
+            return False, f"Could not generate unique reservation number: {last_error}"
 
         # Update order status
         conn.execute(text("""
