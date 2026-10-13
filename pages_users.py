@@ -54,6 +54,9 @@ def users_page():
         df = get_users(search=search or None,
                        role_id=role_opts.get(role_sel),
                        active_only=active_only)
+        import pandas as pd
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame()
 
         if df.empty:
             st.info("No users match the filter.")
