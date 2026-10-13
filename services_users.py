@@ -10,7 +10,13 @@ import streamlit as st
 from datetime import datetime, date
 from sqlalchemy import text
 from database import get_db_connection, log_audit, read_sql
+import pandas as pd
 
+def _safe_df(df):
+    """Guarantee a DataFrame is returned, never None."""
+    if isinstance(df, pd.DataFrame):
+        return df
+    return pd.DataFrame()
 
 # Must match streamlit_app.py hash_password()
 _SALT = "amigoz_secure_salt_2024"
@@ -33,6 +39,9 @@ def generate_temp_password(length=10):
 # =========================================================
 # USERS
 # =========================================================
+# =========================================================
+# USERS
+# =========================================================
 def get_users(search=None, role_id=None, active_only=False):
     query = """
         SELECT 
@@ -48,25 +57,38 @@ def get_users(search=None, role_id=None, active_only=False):
     if active_only:
         query += " AND u.is_active = :active"
         params["active"] = True
+    if role_id:
+        query += " AND u.role_id = :rid"
+        params["rid"] = role_id
+    if search:
+        query += """ AND (
+            LOWER(u.username) LIKE :s
+            OR LOWER(u.email) LIKE :s
+            OR LOWER(u.first_name) LIKE :s
+            OR LOWER(u.last_name) LIKE :s
+        )"""
+        params["s"] = f"%{search.lower()}%"
+    query += " ORDER BY u.id DESC"
+    return _safe_df(read_sql(query, params if params else None))
 
 
 def get_user(user_id):
-    df = read_sql("""
+    df = _safe_df(read_sql("""
         SELECT u.*, r.name as role_name
         FROM users u
         LEFT JOIN roles r ON u.role_id = r.id
         WHERE u.id = :id
-    """, {"id": user_id})
+    """, {"id": user_id}))
     return None if df.empty else df.iloc[0]
 
 
 def get_user_by_username(username):
-    df = read_sql("""
+    df = _safe_df(read_sql("""
         SELECT u.*, r.name as role_name
         FROM users u
         LEFT JOIN roles r ON u.role_id = r.id
         WHERE LOWER(u.username) = LOWER(:u)
-    """, {"u": username})
+    """, {"u": username}))
     return None if df.empty else df.iloc[0]
 
 
@@ -98,7 +120,7 @@ def create_user(username, email=None, password=None, first_name=None,
                 created_at, updated_at
             ) VALUES (
                 :u, :e, :p, :fn, :ln,
-                :ph, :rid, 1, :su,
+                :ph, :rid, :active, :su,
                 :mcp, :notes, :by,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             ) RETURNING id
@@ -110,6 +132,7 @@ def create_user(username, email=None, password=None, first_name=None,
             "ln": last_name,
             "ph": phone,
             "rid": role_id,
+            "active": True,
             "su": is_superuser,
             "mcp": must_change_password,
             "notes": notes,
@@ -130,8 +153,7 @@ def create_user(username, email=None, password=None, first_name=None,
 
 
 def update_user(user_id, **kwargs):
-    """Update user fields. Allowed: email, first_name, last_name, phone,
-    role_id, is_active, is_superuser, notes."""
+    """Update user fields."""
     allowed = ["email", "first_name", "last_name", "phone",
                "role_id", "is_active", "is_superuser", "notes"]
     updates = []
@@ -139,6 +161,8 @@ def update_user(user_id, **kwargs):
 
     for k, v in kwargs.items():
         if k in allowed:
+            if k in ("is_active", "is_superuser"):
+                v = bool(v)
             updates.append(f"{k} = :{k}")
             params[k] = v
 
@@ -164,15 +188,14 @@ def update_user(user_id, **kwargs):
 
 
 def deactivate_user(user_id):
-    """Soft-delete: set is_active = 0"""
-    # Prevent self-deactivation
+    """Soft-delete: set is_active = False"""
     if user_id == st.session_state.get('user_id'):
         return False, "You cannot deactivate your own account"
-    return update_user(user_id, is_active=0)
+    return update_user(user_id, is_active=False)
 
 
 def activate_user(user_id):
-    return update_user(user_id, is_active=1)
+    return update_user(user_id, is_active=True)
 
 
 def reset_password(user_id, new_password=None, must_change=True):
@@ -204,7 +227,7 @@ def reset_password(user_id, new_password=None, must_change=True):
 
 
 def change_own_password(user_id, old_password, new_password):
-    """User changes their own password. Requires old password."""
+    """User changes their own password."""
     if not old_password or not new_password:
         return False, "Both old and new passwords required"
     if len(new_password) < 6:
